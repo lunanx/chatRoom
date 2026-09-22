@@ -1,0 +1,123 @@
+#pragma once
+
+#include "ClientSession.h"
+#include <thread>
+#include <sys/epoll.h>
+#include <unordered_map>
+#include <queue>
+#define subMAXCnt 4
+#define subSessionMAXCnt 64
+
+// 定义新连接客户端信息结构体
+struct ConInfo
+{
+    ConInfo(int fd, sockaddr_in *cin)
+    {
+        m_fd = fd;
+        m_cin = cin;
+    }
+    int m_fd;
+    sockaddr_in *m_cin;
+};
+
+/*
+    每个线程实例化自己的epoll，由主线程进行轮询调用
+*/
+class SubReactor
+{
+public:
+    /*
+        初始化成员变量
+    */
+    SubReactor();
+
+    /*
+        给主线程一个API
+        让主线程将新客户端添加至连接队列
+    */
+    void addQueueConnFD(const ConInfo &info); // 给老爹一个API，帮你直接加
+    /*
+        给主线程一个获取唤醒文件描述符的API 在唤醒前，起码这个m_wakeFD初始化好了，也就是已经存在文件。
+    */
+    int getWakeFD(); // 给老爹一个获取你门铃的API
+
+    /*
+        如何处理如果不同线程之间的客户端若是一个群聊或私聊要如何通信 ----Q3
+
+        用于外部调用reactor
+        内部处理epoll_wait，并分发事件
+        实现步骤
+        1 创建epoll文件描述符
+        2 利用eventfd创建m_wakeFD计数文件器描述符，注意，由于客户端通信用到了read，这里eventfd的flag参数要设置非阻塞
+        3 将m_wakeFD加入epoll
+        4 循环等待事件发生
+            若是m_wakeFD事件发生，说明主线程产生了新连接
+                读取里面的计数，根据计数进行获取queue.front和删				 除.pop()，并将其加入到epoll和map里
+            若是客户端，则进行通信
+    */
+    void reactor(int reactorId);
+
+private:
+    /*
+        实例化epoll文件描述符
+    */
+    void createEpollFD();
+    /*
+        将fd加入epoll中
+    */
+    void addToEpoll(int fd, sockaddr_in *cin);
+    /*
+        将fd从epoll删除
+    */
+    void removeEpollFD(int fd);
+
+    // void modifyEpollFD(); 这个当前阶段先不实现，之后在考虑
+
+    std::queue<ConInfo> m_queueConnFD; // 接收老爹的新连接
+
+    std::unordered_map<int, ClientSession *> m_cliSessionsMap; // 这里用哈希表可以快速查询到，也便于插入和删除
+
+    epoll_event m_evs[subSessionMAXCnt]; // 每个线程产生的文件描述符集合
+
+    int m_wakeFD; // 用于老爹唤醒
+
+    int m_epfd; // 每个线程独自的epoll套接字
+};
+
+/*
+    该类只负责进行accpet，并管理分支线程SubReactor
+*/
+class EpollReactor
+{
+public:
+    /*      为什么不能在这里初始化线程数组呢-----Q1
+    构造函数，初始化m_sfd,m_subTimer,并实例化subReactors对象数组
+    */
+    EpollReactor(int sfd);
+    /*
+        析构函数，delelte subReactors指针数组
+        并分离所有线程
+        注意这里一定不close(m_sfd)，由Tcp自己close
+    */
+    ~EpollReactor();
+    /*为什么不让主线程进行epoll，然后再每个线程进行通信----Q2
+
+        实现主线程做accept，每个线程实例化自己的epoll
+        实现步骤:
+        1 初始化线程数组m_threads，将每个subReactor的reactor函数作用于每个线程，线程等待主线程的唤醒
+        2 主线程循环等待客户端的连接
+        3 有客户端发来连接请求后，轮询通知sub,这里做个简单的m_subTimer++ % subMAXCnt后续有牛逼的再更改
+        4 先将新的客户端信息加入 轮询到sub的连接队列里
+        5 唤醒sub,也就是eventfd计数器+1.
+    */
+    void allocate();
+
+private:
+    int m_sfd; // 服务器的套接字由Tcp类创建好
+
+    int m_subTimer; // 主线程的时间片，轮询调用子线程
+
+    SubReactor *subReactors[subMAXCnt]; // 子线程处理函数
+
+    std::vector<std::thread> m_threads; // 子线程数组
+};
