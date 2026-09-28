@@ -25,9 +25,9 @@ public:
     void init();
 
 private:
-    void myBind();
+    int myBind();
 
-    void myListen();
+    int myListen();
 
     int m_sfd; // 服务器套接字
 

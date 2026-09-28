@@ -3,7 +3,6 @@
 #include <unistd.h>
 ClientSession::ClientSession(int cfd, sockaddr_in *cin)
     : m_cfd(cfd),
-      m_buf(new char[128]{}),
       m_caddr(*cin)
 {
 }
@@ -11,11 +10,11 @@ ClientSession::ClientSession(int cfd, sockaddr_in *cin)
 ClientSession::~ClientSession()
 {
     close(m_cfd);
-    delete[] m_buf;
 }
 
-void ClientSession::handle_write(const char *buf, ssize_t len)
+void ClientSession::handle_write(const char *buf, size_t len)
 {
+
     if (send(m_cfd, buf, len, 0) == -1)
     {
         perror("send error");
@@ -25,19 +24,32 @@ void ClientSession::handle_write(const char *buf, ssize_t len)
 
 int ClientSession::handle_read()
 {
+    //每次读取前先清空m_buf
+    memset(m_buf,0,sizeof(m_buf));
+
+
     char buf[128] = ""; //不直接用m_buf防止收到错误数据
-    int res = recv(m_cfd, buf, sizeof(buf), 0);
-    if (res == -1)
+    ssize_t res = recv(m_cfd, buf, sizeof(buf), 0);
+    if(res > 0)
     {
-        perror("recv error");
-        return -1;
+        //实际收到字节数
+        size_t n = static_cast<size_t>(res);
+        if(n <= (size_t)BUFSIZE)
+        {
+            memcpy(m_buf,buf,n);
+        }
     }
-    else if (res == 0)
+    else if(res == 0)
     {
         printf("对端已下线\n");
         return 0;
     }
-    strcpy(m_buf,buf);
+    else
+    {
+        //可能errno == EINTR 中断信号 ，但由于还不知JSON数据大小，先不管了
+        perror("recv error");
+        return -1;
+    }
     return res;
 }
 

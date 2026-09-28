@@ -18,16 +18,21 @@ EpollReactor::~EpollReactor()
 {
     for (int i = 0; i < subMAXCnt; ++i)
     {
+        //应该先向当前线程发送停止信号，否则delete后停止信号文件描述符就不在了
+        uint64_t cnt = 1;
+        write(subReactors[i]->getStopFD(), &cnt, sizeof(cnt));
+        m_threads[i].join();
+
         if (subReactors[i] != nullptr)
         {
             delete subReactors[i];    // 释放单个对象
             subReactors[i] = nullptr; // 置空防止悬空指针
         }
-        m_threads[i].detach();
+
     }
 }
 
-void EpollReactor::allocate()
+void EpollReactor::run()
 {
     if (!m_threads.empty())
     {
@@ -43,6 +48,7 @@ void EpollReactor::allocate()
     int newfd;
     while (1)
     {
+        socklen = sizeof(cin);
         newfd = accept(m_sfd, (sockaddr *)&cin, &socklen);
         if (newfd == -1)
         {
@@ -53,7 +59,7 @@ void EpollReactor::allocate()
         // 有新连接来了,轮询sub
         auto sub = subReactors[m_subTimer++ % subMAXCnt];
         // 儿子都在 wait阻塞呢，先将客户端信息放到他的连接队列中
-        sub->addQueueConnFD(ConInfo{newfd, &cin});
+        sub->addQueueConnFD(ConInfo{newfd, cin});
 
         uint64_t cnt = 1;
         // 唤醒儿子
@@ -64,10 +70,19 @@ void EpollReactor::allocate()
 SubReactor::SubReactor()
     : m_queueConnFD(),
       m_cliSessionsMap(),
-      m_evs{},
-      m_wakeFD(-1),
-      m_epfd(-1)
+      m_evs{}
 {
+    createEpollFD();
+    m_wakeFD = eventfd(0, EFD_NONBLOCK); // 设置一个门铃，老爹会敲门铃，参数二为了不让read函数阻塞
+    m_stopSignalFD = eventfd(0,EFD_NONBLOCK);// 设置一个停止信号，当老爹delete的时候，要回收线程
+    addToEpoll(m_wakeFD, nullptr);       // 将m_wakeFD文件描述符加入到epoll中
+}
+
+SubReactor::~SubReactor()
+{
+    close(m_wakeFD);
+    close(m_stopSignalFD);
+    close(m_epfd);
 }
 
 void SubReactor::addQueueConnFD(const ConInfo &info)
@@ -78,6 +93,11 @@ void SubReactor::addQueueConnFD(const ConInfo &info)
 int SubReactor::getWakeFD()
 {
     return m_wakeFD;
+}
+
+int SubReactor::getStopFD()
+{
+    return m_stopSignalFD;
 }
 
 void SubReactor::createEpollFD()
@@ -106,9 +126,6 @@ void SubReactor::addToEpoll(int fd, sockaddr_in *cin)
         perror("epoll add error");
         return;
     }
-    // 如果是唤醒描述符，不创建session
-    if (fd != m_wakeFD)
-        m_cliSessionsMap.insert({fd, new ClientSession(fd, cin)});
 }
 
 void SubReactor::removeEpollFD(int fd)
@@ -124,16 +141,14 @@ void SubReactor::removeEpollFD(int fd)
         perror("epoll add error");
         return;
     }
-
+    delete m_cliSessionsMap[fd]; //ClientSession析构函数会close fd，不需要你再次close
     m_cliSessionsMap.erase(fd);
 }
 // 只被老爹点名一次，之后就是利用eventfd来通知有新客户连接
 // 这里的函数参数用于测试，之后要记得删除
 void SubReactor::reactor(int reactorId)
 {
-    createEpollFD();
-    m_wakeFD = eventfd(0, EFD_NONBLOCK); // 设置一个门铃，老爹会敲门铃，参数二为了不让read函数阻塞
-    addToEpoll(m_wakeFD, nullptr);       // 将m_wakeFD文件描述符加入到epoll中
+
     while (1)
     {
         int num = epoll_wait(m_epfd, m_evs, subSessionMAXCnt, -1);
@@ -156,10 +171,19 @@ void SubReactor::reactor(int reactorId)
                 {
                     ConInfo newConInfo = m_queueConnFD.front();
                     m_queueConnFD.pop();
-                    addToEpoll(newConInfo.m_fd, newConInfo.m_cin);
+                    addToEpoll(newConInfo.m_fd, &newConInfo.m_cin);
+                    //创建session哈希表
                     m_cliSessionsMap.insert({newConInfo.m_fd,
-                                             new ClientSession(newConInfo.m_fd, newConInfo.m_cin)});
+                                             new ClientSession(newConInfo.m_fd, &newConInfo.m_cin)});
                 }
+            }
+            // 老爹发出了停止信号，该溜溜球了
+            else if(newfd == m_stopSignalFD)
+            {
+                // 读取计数器
+                uint64_t cnt;
+                read(m_wakeFD, &cnt, sizeof(cnt)); // 消耗事件
+                return; //直接return
             }
             else
             {
@@ -172,7 +196,7 @@ void SubReactor::reactor(int reactorId)
                 // 注意ClientSession里面封装了读写事件
                 // 下面都是测试用，下个阶段的时候删除，也就是在操作数据库的时候删除
                 int res = cli->second->handle_read(); // 读取客户端的消息
-                char *buf = cli->second->getbuf();
+                char* buf = cli->second->getbuf(); //得到的是m_buf指针
                 if (res == 0)
                 {
                     // 对端下线了，将fd从epoll中DEL
@@ -182,7 +206,7 @@ void SubReactor::reactor(int reactorId)
                     continue;
                 }
                 printf("客户端发送的数据为:%s\n", buf);
-                strcat(buf, "*_*");
+                strcat(buf, "*_*");//由于buf是m_buf指针，这个操作修改了buf,
                 cli->second->handle_write(buf, sizeof(buf));
             }
         }

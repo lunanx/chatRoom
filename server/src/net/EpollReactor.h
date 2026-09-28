@@ -11,13 +11,13 @@
 // 定义新连接客户端信息结构体
 struct ConInfo
 {
-    ConInfo(int fd, sockaddr_in *cin)
+    ConInfo(int fd, sockaddr_in cin)
     {
         m_fd = fd;
         m_cin = cin;
     }
     int m_fd;
-    sockaddr_in *m_cin;
+    sockaddr_in m_cin;
 };
 
 /*
@@ -30,7 +30,10 @@ public:
         初始化成员变量
     */
     SubReactor();
-
+    /*
+        析构函数，用于关闭套接字
+    */
+    ~SubReactor();
     /*
         给主线程一个API
         让主线程将新客户端添加至连接队列
@@ -40,6 +43,11 @@ public:
         给主线程一个获取唤醒文件描述符的API 在唤醒前，起码这个m_wakeFD初始化好了，也就是已经存在文件。
     */
     int getWakeFD(); // 给老爹一个获取你门铃的API
+
+    /*
+        给主线程一个发出停止信号的文件描述符的API 在发出信号之前，起码这个m_wakeFD初始化好了，也就是已经存在文件。  
+    */
+    int getStopFD();
 
     /*
         如何处理如果不同线程之间的客户端若是一个群聊或私聊要如何通信 ----Q3
@@ -82,6 +90,8 @@ private:
     int m_wakeFD; // 用于老爹唤醒
 
     int m_epfd; // 每个线程独自的epoll套接字
+
+    int m_stopSignalFD; // 用于老爹调用自己的析构函数，提醒孩子该退出线程了
 };
 
 /*
@@ -110,7 +120,7 @@ public:
         4 先将新的客户端信息加入 轮询到sub的连接队列里
         5 唤醒sub,也就是eventfd计数器+1.
     */
-    void allocate();
+    void run();
 
 private:
     int m_sfd; // 服务器的套接字由Tcp类创建好

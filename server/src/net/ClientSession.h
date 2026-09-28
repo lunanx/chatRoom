@@ -5,6 +5,9 @@
 #include <sys/socket.h>
 #include <netinet/in.h>
 #include <arpa/inet.h>
+
+#define BUFSIZE 128
+
 /*
     该类用于与客户端通信
     
@@ -15,7 +18,7 @@ class ClientSession
 {
 public:
     /*
-     构造函数
+        构造函数
     */
     ClientSession(int cfd,sockaddr_in* cin);
     /*
@@ -26,7 +29,7 @@ public:
     	服务端向客户端发送len长度的buf数据,目前阶段只做简单测试
     	后续得考虑JSON数据
     */
-    void handle_write(const char *buf,ssize_t len); 
+    void handle_write(const char *buf,size_t len); 
     /*
     	服务端从客户端接收数据，目前阶段只做简单测试
     	后续得考虑JSON数据
@@ -47,7 +50,7 @@ public:
 private:
     int m_cfd;//客户端套接字
 
-    char* m_buf;//当前阶段用char* 类型进行简单通信测试，后续要改成JSON
+    char m_buf[BUFSIZE];//当前阶段用char* 类型进行简单通信测试，后续要改成JSON
 
     struct sockaddr_in m_caddr;//客户端地址信息
 
