@@ -5,6 +5,8 @@
 #include <sys/epoll.h>
 #include <unordered_map>
 #include <queue>
+#include <vector>
+
 #define subMAXCnt 4
 #define subSessionMAXCnt 64
 
@@ -50,6 +52,11 @@ public:
     int getStopFD();
 
     /*
+        用于初始化，方便查看哪些创建失败
+    */
+    bool init();
+
+    /*
         如何处理如果不同线程之间的客户端若是一个群聊或私聊要如何通信 ----Q3
 
         用于外部调用reactor
@@ -73,7 +80,7 @@ private:
     /*
         将fd加入epoll中
     */
-    void addToEpoll(int fd, sockaddr_in *cin);
+    bool addToEpoll(int fd, sockaddr_in *cin);
     /*
         将fd从epoll删除
     */

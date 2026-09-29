@@ -11,6 +11,11 @@ EpollReactor::EpollReactor(int sfd)
     for (int i = 0; i < subMAXCnt; i++)
     {
         subReactors[i] = new SubReactor();
+        if(subReactors[i]->init() == false)
+        {
+            delete subReactors[i];
+            subReactors[i] = nullptr;
+        }
     }
 }
 
@@ -34,6 +39,13 @@ EpollReactor::~EpollReactor()
 
 void EpollReactor::run()
 {
+    for(int i =0;i < subMAXCnt;i++)
+    {
+        if(subReactors[i] == nullptr)
+        {
+            printf("EpollReactor run error!\n");
+        }
+    }
     if (!m_threads.empty())
     {
         m_threads.clear();
@@ -68,21 +80,54 @@ void EpollReactor::run()
 }
 //------------------------SubReactor----------------------
 SubReactor::SubReactor()
-    : m_queueConnFD(),
+    : m_epfd(-1),
+      m_wakeFD(-1),
+      m_stopSignalFD(-1),
+      m_queueConnFD(),
       m_cliSessionsMap(),
       m_evs{}
 {
-    createEpollFD();
-    m_wakeFD = eventfd(0, EFD_NONBLOCK); // 设置一个门铃，老爹会敲门铃，参数二为了不让read函数阻塞
-    m_stopSignalFD = eventfd(0,EFD_NONBLOCK);// 设置一个停止信号，当老爹delete的时候，要回收线程
-    addToEpoll(m_wakeFD, nullptr);       // 将m_wakeFD文件描述符加入到epoll中
 }
 
 SubReactor::~SubReactor()
 {
+    for(auto p:m_cliSessionsMap)
+    {
+        delete p.second;
+    }
+    m_cliSessionsMap.clear();
     close(m_wakeFD);
     close(m_stopSignalFD);
     close(m_epfd);
+}
+
+bool SubReactor::init()
+{
+    createEpollFD();
+    if(m_epfd == -1)
+    {
+        return false;
+    }
+    if((m_wakeFD = eventfd(0, EFD_NONBLOCK)) == -1) // 设置一个门铃，老爹会敲门铃，参数二为了不让read函数阻塞
+    {
+        perror("m_wakeFD init error");
+        return false;
+    }
+    if((m_stopSignalFD = eventfd(0,EFD_NONBLOCK)) == -1)// 设置一个停止信号，当老爹delete的时候，要回收线程
+    {
+        perror("m_stopSignalFD init error");
+        return false;
+    }
+    if(addToEpoll(m_stopSignalFD, nullptr) == false)       // 将m_stopSignalFD文件描述符加入到epoll中
+    {
+        perror("m_stopSignalFD add to epoll error");
+        return false;
+    }
+    if(addToEpoll(m_wakeFD, nullptr) == false)       // 将m_wakeFD文件描述符加入到epoll中
+    {
+        perror("m_wakeFD add to epoll error");
+        return false;
+    }
 }
 
 void SubReactor::addQueueConnFD(const ConInfo &info)
@@ -102,21 +147,20 @@ int SubReactor::getStopFD()
 
 void SubReactor::createEpollFD()
 {
-    int epfd = epoll_create(1);
-    if (epfd == -1)
+    m_epfd = epoll_create(1);
+    if (m_epfd == -1)
     {
         perror("epoll create error");
         return;
     }
-    m_epfd = epfd;
 }
 
-void SubReactor::addToEpoll(int fd, sockaddr_in *cin)
+bool SubReactor::addToEpoll(int fd, sockaddr_in *cin)
 {
-    // 已经存在，不添加
+    // 已经存在，算添加成功
     if (m_cliSessionsMap.find(fd) != m_cliSessionsMap.end())
     {
-        return;
+        return true;
     }
     epoll_event ev;
     ev.events = EPOLLIN;
@@ -124,7 +168,7 @@ void SubReactor::addToEpoll(int fd, sockaddr_in *cin)
     if (epoll_ctl(m_epfd, EPOLL_CTL_ADD, fd, &ev) == -1)
     {
         perror("epoll add error");
-        return;
+        return false;
     }
 }
 
@@ -182,7 +226,7 @@ void SubReactor::reactor(int reactorId)
             {
                 // 读取计数器
                 uint64_t cnt;
-                read(m_wakeFD, &cnt, sizeof(cnt)); // 消耗事件
+                read(m_stopSignalFD, &cnt, sizeof(cnt)); // 消耗事件
                 return; //直接return
             }
             else
@@ -200,14 +244,25 @@ void SubReactor::reactor(int reactorId)
                 if (res == 0)
                 {
                     // 对端下线了，将fd从epoll中DEL
-                    delete cli->second;
-                    cli->second = nullptr;
-                    m_cliSessionsMap.erase(newfd);
+                    removeEpollFD(newfd);
+                    continue;
+                }
+                else if(res == -1)
+                {
                     continue;
                 }
                 printf("客户端发送的数据为:%s\n", buf);
-                strcat(buf, "*_*");//由于buf是m_buf指针，这个操作修改了buf,
-                cli->second->handle_write(buf, sizeof(buf));
+            
+                if(strlen(buf) >= (size_t)125)//如果strcat不了，就直接发笑脸反正是测试
+                {
+                    memset(buf,0,sizeof(buf));
+                    strcpy(buf,"*_*");
+                }
+                else 
+                {
+                    strcat(buf, "*_*");//由于buf是m_buf指针，这个操作修改了buf,
+                }
+                cli->second->handle_write(buf, strlen(buf));
             }
         }
     }

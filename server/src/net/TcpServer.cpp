@@ -6,7 +6,9 @@
 #include <arpa/inet.h>
 
 TcpServer::TcpServer()
-    : m_saddr{AF_INET, htons(SERVER_HOST_PORT), {inet_addr(SERVER_HOST_ADDR)}}
+    : m_sfd(-1),
+      m_epollReactor(nullptr),
+      m_saddr{AF_INET, htons(SERVER_HOST_PORT), {inet_addr(SERVER_HOST_ADDR)}}
 {
 
 }
@@ -25,6 +27,7 @@ void TcpServer::init()
     if(m_sfd == -1)
     {
         perror("socket create error");
+        return;
     }
 
     int opt = 1;
@@ -64,7 +67,7 @@ int TcpServer::myListen()
     if (listen(m_sfd, 128) == -1)
     {
         perror("listen error");
-        return 1;
+        return -1;
     }
     printf("listen success\n");
     return 0;
