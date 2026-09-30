@@ -50,7 +50,7 @@ public:
     int getWakeFD(); // 给老爹一个获取你门铃的API
 
     /*
-        给主线程一个发出停止信号的文件描述符的API 在发出信号之前，起码这个m_wakeFD初始化好了，也就是已经存在文件。  
+        给主线程一个发出停止信号的文件描述符的API 在发出信号之前，起码这个m_wakeFD初始化好了，也就是已经存在文件。
     */
     int getStopFD();
 
@@ -83,7 +83,7 @@ private:
     /*
         将fd加入epoll中
     */
-    bool addToEpoll(int fd, sockaddr_in *cin);
+    bool addToEpoll(int fd);
     /*
         将fd从epoll删除
     */
@@ -113,7 +113,7 @@ public:
     /*      为什么不能在这里初始化线程数组呢-----Q1
     构造函数，初始化m_sfd,m_subTimer,并实例化subReactors对象数组
     */
-    EpollReactor(int sfd);
+    EpollReactor();
     /*
         析构函数，delelte subReactors指针数组
         并分离所有线程
@@ -131,11 +131,36 @@ public:
         5 唤醒sub,也就是eventfd计数器+1.
     */
     void run();
+    /*
+        初始化主线程MainEpoll，
+        这里的epoll用于检测新连接和停止事件
+    */
+    bool initMEpoll(int sfd);
+
+    /*
+        给控制端一个获取m_MStopFD的API接口
+    */
+    int getMStopFD();
 
 private:
+    /*
+        创建主线程的epollFD文件描述符
+    */
+    void createMEpollFD();
+    /*
+        将fd加入epoll中
+    */
+    bool addToMEpoll(int fd);
+    
     int m_sfd; // 服务器的套接字由Tcp类创建好
 
     int m_subTimer; // 主线程的时间片，轮询调用子线程
+
+    int m_MStopFD; // 主线程的停止事件
+
+    int m_MEpfd; // 主线程的epollFD
+
+    epoll_event m_MEvs[2]; // 主线程线程产生的文件描述符集合，目前就两个,之后还有就定义宏
 
     SubReactor *m_subReactors[subMAXCnt]; // 子线程处理函数
 

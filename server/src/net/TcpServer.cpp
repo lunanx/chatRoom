@@ -10,12 +10,12 @@ TcpServer::TcpServer()
       m_epollReactor(nullptr),
       m_saddr{AF_INET, htons(SERVER_HOST_PORT), {inet_addr(SERVER_HOST_ADDR)}}
 {
-
 }
 
 TcpServer::~TcpServer()
 {
-    close(m_sfd);
+
+    if(m_sfd != -1) close(m_sfd);
     delete m_epollReactor;
     m_epollReactor = nullptr;
 }
@@ -24,29 +24,29 @@ void TcpServer::init()
 {
 
     m_sfd = socket(AF_INET, SOCK_STREAM, 0);
-    if(m_sfd == -1)
+    if (m_sfd == -1)
     {
         perror("socket create error");
         return;
     }
 
     int opt = 1;
-    if(setsockopt(m_sfd, SOL_SOCKET, SO_REUSEADDR,&opt,sizeof(opt)) == -1)
+    if (setsockopt(m_sfd, SOL_SOCKET, SO_REUSEADDR, &opt, sizeof(opt)) == -1)
     {
         perror("setsockopt error");
         return;
     }
 
-    m_epollReactor = new EpollReactor(m_sfd);
-
-    if(myBind() == -1)
+    if (myBind() == -1)
     {
         return;
     }
-    if(myListen() == -1)
+    if (myListen() == -1)
     {
         return;
     }
+    m_epollReactor = new EpollReactor();
+    m_epollReactor->initMEpoll(m_sfd);
     m_epollReactor->run();
 }
 

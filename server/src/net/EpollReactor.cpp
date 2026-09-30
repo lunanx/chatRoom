@@ -6,15 +6,18 @@
 std::mutex mux;
 
 //------------------------EpollReactor----------------------
-EpollReactor::EpollReactor(int sfd)
-    : m_sfd(sfd),
+EpollReactor::EpollReactor()
+    : m_sfd(-1),
       m_subTimer(0),
-      m_threads(subMAXCnt)
+      m_threads(subMAXCnt),
+      m_MEpfd(-1),
+      m_MStopFD(-1),
+      m_MEvs{}
 {
     for (int i = 0; i < subMAXCnt; i++)
     {
         m_subReactors[i] = new SubReactor();
-        if(m_subReactors[i]->initSub() == false)
+        if (m_subReactors[i]->initSub() == false)
         {
             delete m_subReactors[i];
             m_subReactors[i] = nullptr;
@@ -26,11 +29,13 @@ EpollReactor::~EpollReactor()
 {
     for (int i = 0; i < subMAXCnt; ++i)
     {
-        //应该先向当前线程发送停止信号，否则delete后停止信号文件描述符就不在了
-    
-        uint64_t cnt = 1;
-        write(m_subReactors[i]->getStopFD(), &cnt, sizeof(cnt));
-        if(m_threads[i].joinable()) m_threads[i].join();
+        // 应该先向当前线程发送停止信号，否则delete后停止信号文件描述符就不在了
+        if (m_threads[i].joinable())
+        {
+            uint64_t cnt = 1;
+            write(m_subReactors[i]->getStopFD(), &cnt, sizeof(cnt));
+            m_threads[i].join();
+        }
         if (m_subReactors[i] != nullptr)
         {
             delete m_subReactors[i];    // 释放单个对象
@@ -39,16 +44,75 @@ EpollReactor::~EpollReactor()
     }
 }
 
-void EpollReactor::run()
+bool EpollReactor::initMEpoll(int sfd)
 {
-    for(int i =0;i < subMAXCnt;i++)
+    createMEpollFD();
+    if (m_MEpfd == -1)
     {
-        if(m_subReactors[i] == nullptr)
+        return false;
+    }
+
+    if ((m_MStopFD = eventfd(0, EFD_NONBLOCK)) == -1) // 设置一个停止信号计数器，给控制端停止用
+    {
+        perror("m_stopSignalFD init error");
+        return false;
+    }
+
+    if (addToMEpoll(m_MStopFD) == false) // 将m_MStopFD文件描述符加入到epoll中
+    {
+        printf("m_MStopFD add to epoll error\n");
+        return false;
+    }
+
+    m_sfd = sfd;
+
+    if (addToMEpoll(m_sfd) == false) // 将m_sfd文件描述符加入到epoll中
+    {
+        printf("m_sfd add to epoll error\n");
+        return false;
+    }
+
+    for (int i = 0; i < subMAXCnt; i++)
+    {
+        if (m_subReactors[i] == nullptr)
         {
             printf("EpollReactor run error!\n");
-            return;
+            return false;
         }
     }
+    return true;
+}
+
+int EpollReactor::getMStopFD()
+{
+    return m_MStopFD;
+}
+
+void EpollReactor::createMEpollFD()
+{
+    m_MEpfd = epoll_create(1);
+    if (m_MEpfd == -1)
+    {
+        perror("m_MEpfd create error");
+        return;
+    }
+}
+
+bool EpollReactor::addToMEpoll(int fd)
+{
+    epoll_event ev;
+    ev.events = EPOLLIN;
+    ev.data.fd = fd;
+    if (epoll_ctl(m_MEpfd, EPOLL_CTL_ADD, fd, &ev) == -1)
+    {
+        perror("in m_MEpfd, add error");
+        return false;
+    }
+    return true;
+}
+
+void EpollReactor::run()
+{
     if (!m_threads.empty())
     {
         m_threads.clear();
@@ -58,29 +122,51 @@ void EpollReactor::run()
     {
         m_threads.emplace_back(&SubReactor::reactor, m_subReactors[i], i);
     }
+
     sockaddr_in cin;
     socklen_t socklen = sizeof(cin);
-    int newfd;
     while (1)
     {
-        socklen = sizeof(cin);
-        newfd = accept(m_sfd, (sockaddr *)&cin, &socklen);
-        if (newfd == -1)
+        //等待事件
+        int num = epoll_wait(m_MEpfd, m_MEvs, sizeof(m_MEvs)/sizeof(m_MEvs[0]), -1);
+        if (num == -1)
         {
-            perror("accept error");
+            perror("m_MEpfd wait error");
             return;
         }
-        printf("[%s:%d] accept success\n", inet_ntoa(cin.sin_addr), ntohs(cin.sin_port)); // 测试函数，开发后删除
-        // 有新连接来了,轮询sub
-        auto sub = m_subReactors[m_subTimer++ % subMAXCnt];
-        // 儿子都在 wait阻塞呢，先将客户端信息放到他的连接队列中
-        sub->addQueueConnFD(ConInfo{newfd, cin});
-        uint64_t cnt = 1;
-        // 唤醒儿子
-        write(sub->getWakeFD(), &cnt, sizeof(cnt)); 
-        //后续加入什么情况下，服务器要进行关闭
+        for (int i = 0; i < num; i++)
+        {
+            int newfd = m_MEvs[i].data.fd;
+            // 说明有新连接产生
+            if (newfd == m_sfd)
+            {
+                socklen = sizeof(cin);
+                newfd = accept(m_sfd, (sockaddr *)&cin, &socklen);
+                if (newfd == -1)
+                {
+                    perror("accept error");
+                    return;
+                }
+                printf("[%s:%d] accept success\n", inet_ntoa(cin.sin_addr), ntohs(cin.sin_port)); // 测试函数，开发后删除
+                // 有新连接来了,轮询sub
+                auto sub = m_subReactors[m_subTimer++ % subMAXCnt];
+                // 儿子都在 wait阻塞呢，先将客户端信息放到他的连接队列中
+                sub->addQueueConnFD(ConInfo{newfd, cin});
+                uint64_t cnt = 1;
+                // 唤醒儿子
+                write(sub->getWakeFD(), &cnt, sizeof(cnt));
+            }
+            //控制端发来了停止信号
+            else if (newfd == m_MStopFD)
+            {
+                uint64_t cnt;
+                read(newfd, &cnt, sizeof(cnt)); // 消耗事件
+                return;//直接返回
+            }
+        }
     }
 }
+
 //------------------------SubReactor----------------------
 SubReactor::SubReactor()
     : m_epfd(-1),
@@ -94,47 +180,45 @@ SubReactor::SubReactor()
 
 SubReactor::~SubReactor()
 {
-    for(auto p:m_cliSessionsMap)
+    for (auto p : m_cliSessionsMap)
     {
         delete p.second;
     }
     m_cliSessionsMap.clear();
-    while(!m_queueConnFD.empty())
+    while (!m_queueConnFD.empty())
     {
-        auto tmp = m_queueConnFD.front();
-        close(tmp.m_fd);
         m_queueConnFD.pop();
     }
-    close(m_wakeFD);
-    close(m_stopSignalFD);
-    close(m_epfd);
+    if(m_wakeFD != -1) close(m_wakeFD);
+    if(m_stopSignalFD != -1) close(m_stopSignalFD);
+    if(m_epfd != -1) close(m_epfd);
 }
 
 bool SubReactor::initSub()
 {
     createEpollFD();
-    if(m_epfd == -1)
+    if (m_epfd == -1)
     {
         return false;
     }
-    if((m_wakeFD = eventfd(0, EFD_NONBLOCK)) == -1) // 设置一个门铃，老爹会敲门铃，参数二为了不让read函数阻塞
+    if ((m_wakeFD = eventfd(0, EFD_NONBLOCK)) == -1) // 设置一个门铃，老爹会敲门铃，参数二为了不让read函数阻塞
     {
         perror("m_wakeFD init error");
         return false;
     }
-    if((m_stopSignalFD = eventfd(0,EFD_NONBLOCK)) == -1)// 设置一个停止信号，当老爹delete的时候，要回收线程
+    if ((m_stopSignalFD = eventfd(0, EFD_NONBLOCK)) == -1) // 设置一个停止信号，当老爹delete的时候，要回收线程
     {
         perror("m_stopSignalFD init error");
         return false;
     }
-    if(addToEpoll(m_stopSignalFD, nullptr) == false)       // 将m_stopSignalFD文件描述符加入到epoll中
+    if (addToEpoll(m_stopSignalFD) == false) // 将m_stopSignalFD文件描述符加入到epoll中
     {
-        perror("m_stopSignalFD add to epoll error");
+        printf("m_stopSignalFD add to epoll error\n");
         return false;
     }
-    if(addToEpoll(m_wakeFD, nullptr) == false)       // 将m_wakeFD文件描述符加入到epoll中
+    if (addToEpoll(m_wakeFD) == false) // 将m_wakeFD文件描述符加入到epoll中
     {
-        perror("m_wakeFD add to epoll error");
+        printf("m_wakeFD add to epoll error\n");
         return false;
     }
 
@@ -143,9 +227,9 @@ bool SubReactor::initSub()
 
 void SubReactor::addQueueConnFD(const ConInfo &info)
 {
-    mux.lock();//获取锁资源
+    mux.lock(); // 获取锁资源
     m_queueConnFD.push(info);
-    mux.unlock();//释放锁资源
+    mux.unlock(); // 释放锁资源
 }
 
 int SubReactor::getWakeFD()
@@ -163,12 +247,12 @@ void SubReactor::createEpollFD()
     m_epfd = epoll_create(1);
     if (m_epfd == -1)
     {
-        perror("epoll create error");
+        perror("m_epfd create error");
         return;
     }
 }
 
-bool SubReactor::addToEpoll(int fd, sockaddr_in *cin)
+bool SubReactor::addToEpoll(int fd)
 {
     // 已经存在，算添加成功
     if (m_cliSessionsMap.find(fd) != m_cliSessionsMap.end())
@@ -180,13 +264,12 @@ bool SubReactor::addToEpoll(int fd, sockaddr_in *cin)
     ev.data.fd = fd;
     if (epoll_ctl(m_epfd, EPOLL_CTL_ADD, fd, &ev) == -1)
     {
-        perror("epoll add error");
+        perror("in m_epfd, add error");
         return false;
     }
 
     return true;
 }
-
 
 void SubReactor::removeEpollFD(int fd)
 {
@@ -201,7 +284,7 @@ void SubReactor::removeEpollFD(int fd)
         perror("epoll add error");
         return;
     }
-    delete m_cliSessionsMap[fd]; //ClientSession析构函数会close fd，不需要你再次close
+    delete m_cliSessionsMap[fd]; // ClientSession析构函数会close fd，不需要你再次close
     m_cliSessionsMap.erase(fd);
 }
 // 只被老爹点名一次，之后就是利用eventfd来通知有新客户连接
@@ -211,10 +294,11 @@ void SubReactor::reactor(int reactorId)
 
     while (1)
     {
-        int num = epoll_wait(m_epfd, m_evs, subSessionMAXCnt, -1);
+        //等待事件
+        int num = epoll_wait(m_epfd, m_evs, sizeof(m_evs)/sizeof(m_evs[0]), -1);
         if (num == -1)
         {
-            perror("epoll wait error");
+            perror("m_epfd wait error");
             return;
         }
         printf("reactorId = %d 被唤醒了\n", reactorId);
@@ -226,26 +310,26 @@ void SubReactor::reactor(int reactorId)
             {
                 // 读取计数器
                 uint64_t cnt;
-                read(m_wakeFD, &cnt, sizeof(cnt)); // 消耗事件
+                read(newfd, &cnt, sizeof(cnt)); // 消耗事件
                 while (cnt-- != 0)
                 {
-                    mux.lock();//获取锁资源
+                    mux.lock(); // 获取锁资源
                     ConInfo newConInfo = m_queueConnFD.front();
                     m_queueConnFD.pop();
-                    mux.unlock();//释放锁资源
-                    addToEpoll(newConInfo.m_fd, &newConInfo.m_cin);
-                    //创建session哈希表
+                    mux.unlock(); // 释放锁资源
+                    addToEpoll(newConInfo.m_fd);
+                    // 创建session哈希表
                     m_cliSessionsMap.insert({newConInfo.m_fd,
                                              new ClientSession(newConInfo.m_fd, &newConInfo.m_cin)});
                 }
             }
             // 老爹发出了停止信号，该溜溜球了
-            else if(newfd == m_stopSignalFD)
+            else if (newfd == m_stopSignalFD)
             {
                 // 读取计数器
                 uint64_t cnt;
                 read(m_stopSignalFD, &cnt, sizeof(cnt)); // 消耗事件
-                return; //直接return
+                return;                                  // 直接return
             }
             else
             {
@@ -257,29 +341,23 @@ void SubReactor::reactor(int reactorId)
                 }
                 // 注意ClientSession里面封装了读写事件
                 // 下面都是测试用，下个阶段的时候删除，也就是在操作数据库的时候删除
-                int res = cli->second->handle_read(); // 读取客户端的消息
-                char* buf = cli->second->getbuf(); //得到的是m_buf指针
+                ssize_t res = cli->second->handle_read(); // 读取客户端的消息
+                char *buf = cli->second->getbuf();    // 得到的是m_buf指针
                 if (res == 0)
                 {
                     // 对端下线了，将fd从epoll中DEL
                     removeEpollFD(newfd);
                     continue;
                 }
-                else if(res == -1)
+                else if (res == -1)
                 {
                     continue;
                 }
+                else if (res == (ssize_t)128)
+                {
+                    buf[BUFSIZE - 1] = 0;
+                }
                 printf("客户端发送的数据为:%s\n", buf);
-            
-                if(strlen(buf) >= (size_t)125)//如果strcat不了，就直接发笑脸反正是测试
-                {
-                    memset(buf,0,sizeof(buf));
-                    strcpy(buf,"*_*");
-                }
-                else 
-                {
-                    strcat(buf, "*_*");//由于buf是m_buf指针，这个操作修改了buf,
-                }
                 cli->second->handle_write(buf, strlen(buf));
             }
         }

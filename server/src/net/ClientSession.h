@@ -6,7 +6,7 @@
 #include <netinet/in.h>
 #include <arpa/inet.h>
 
-#define BUFSIZE 128
+#define BUFSIZE 4096
 
 /*
     该类用于与客户端通信
@@ -34,7 +34,7 @@ public:
     	服务端从客户端接收数据，目前阶段只做简单测试
     	后续得考虑JSON数据
     */
-    int handle_read();
+    ssize_t handle_read();
 	/*
 		用于外部获取客户端套接字
 	*/
