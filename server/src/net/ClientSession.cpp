@@ -9,7 +9,8 @@ ClientSession::ClientSession(int cfd, sockaddr_in *cin)
 
 ClientSession::~ClientSession()
 {
-    if(m_cfd != -1) close(m_cfd);
+    if (m_cfd != -1)
+        close(m_cfd);
 }
 
 void ClientSession::handle_write(const char *buf, size_t len)

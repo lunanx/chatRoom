@@ -21,9 +21,14 @@ class TcpServer
 public:
     TcpServer();
     ~TcpServer();
-
+    /*
+        初始化服务器
+    */
     void init();
-
+    /*
+        关闭服务器
+    */
+    void stop();
 private:
     int myBind();
 

@@ -15,7 +15,8 @@ TcpServer::TcpServer()
 TcpServer::~TcpServer()
 {
 
-    if(m_sfd != -1) close(m_sfd);
+    if (m_sfd != -1)
+        close(m_sfd);
     delete m_epollReactor;
     m_epollReactor = nullptr;
 }
@@ -45,9 +46,19 @@ void TcpServer::init()
     {
         return;
     }
+
     m_epollReactor = new EpollReactor();
-    m_epollReactor->initMEpoll(m_sfd);
+    if (m_epollReactor->initMEpoll(m_sfd) == false)
+    {
+        return;
+    }
     m_epollReactor->run();
+}
+
+void TcpServer::stop()
+{
+    uint64_t cnt = 1;
+    write(m_epollReactor->getMStopFD(), &cnt, sizeof(cnt));
 }
 
 int TcpServer::myBind()
