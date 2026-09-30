@@ -8,6 +8,7 @@
 TcpServer::TcpServer()
     : m_sfd(-1),
       m_epollReactor(nullptr),
+      m_isInit(false),
       m_saddr{AF_INET, htons(SERVER_HOST_PORT), {inet_addr(SERVER_HOST_ADDR)}}
 {
 }
@@ -16,7 +17,10 @@ TcpServer::~TcpServer()
 {
 
     if (m_sfd != -1)
+    {
         close(m_sfd);
+    }
+    stop();
     delete m_epollReactor;
     m_epollReactor = nullptr;
 }
@@ -52,13 +56,17 @@ void TcpServer::init()
     {
         return;
     }
+    m_isInit = true;
     m_epollReactor->run();
 }
 
 void TcpServer::stop()
 {
-    uint64_t cnt = 1;
-    write(m_epollReactor->getMStopFD(), &cnt, sizeof(cnt));
+    if (m_isInit)
+    {
+        uint64_t cnt = 1;
+        write(m_epollReactor->getMStopFD(), &cnt, sizeof(cnt));
+    }
 }
 
 int TcpServer::myBind()

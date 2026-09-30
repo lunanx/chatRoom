@@ -12,7 +12,8 @@ EpollReactor::EpollReactor()
       m_threads(subMAXCnt),
       m_MEpfd(-1),
       m_MStopFD(-1),
-      m_MEvs{}
+      m_MEvs{},
+      m_subReactors{}
 {
 }
 
@@ -95,7 +96,8 @@ bool EpollReactor::initMEpoll(int sfd)
 
 int EpollReactor::getMStopFD()
 {
-    return m_MStopFD;
+    if (m_MStopFD != -1)
+        return m_MStopFD;
 }
 
 void EpollReactor::createMEpollFD()
@@ -256,12 +258,14 @@ void SubReactor::addQueueConnFD(const ConInfo &info)
 
 int SubReactor::getWakeFD()
 {
-    return m_wakeFD;
+    if (m_wakeFD == -1)
+        return m_wakeFD;
 }
 
 int SubReactor::getStopFD()
 {
-    return m_stopSignalFD;
+    if (m_stopSignalFD == -1)
+        return m_stopSignalFD;
 }
 
 void SubReactor::createEpollFD()
@@ -339,10 +343,16 @@ void SubReactor::reactor(int reactorId)
                     ConInfo newConInfo = m_queueConnFD.front();
                     m_queueConnFD.pop();
                     mux.unlock(); // 释放锁资源
-                    addToEpoll(newConInfo.m_fd);
-                    // 创建session哈希表
-                    m_cliSessionsMap.insert({newConInfo.m_fd,
-                                             new ClientSession(newConInfo.m_fd, &newConInfo.m_cin)});
+                    if (addToEpoll(newConInfo.m_fd))
+                    {
+                        // 创建session哈希表
+                        m_cliSessionsMap.insert({newConInfo.m_fd,
+                                                 new ClientSession(newConInfo.m_fd, &newConInfo.m_cin)});
+                    }
+                    else
+                    {
+                        close(newConInfo.m_fd);
+                    }
                 }
             }
             // 老爹发出了停止信号，该溜溜球了
@@ -374,10 +384,6 @@ void SubReactor::reactor(int reactorId)
                 else if (res == -1)
                 {
                     continue;
-                }
-                else if (res == (ssize_t)128)
-                {
-                    buf[BUFSIZE - 1] = 0;
                 }
                 printf("客户端发送的数据为:%s\n", buf);
                 cli->second->handle_write(buf, strlen(buf));

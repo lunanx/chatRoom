@@ -29,12 +29,15 @@ public:
         关闭服务器
     */
     void stop();
+
 private:
     int myBind();
 
     int myListen();
 
     int m_sfd; // 服务器套接字
+
+    bool m_isInit; // 看看服务器是否初始化成功
 
     struct sockaddr_in m_saddr; // 服务器地址信息
 
