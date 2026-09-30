@@ -27,7 +27,6 @@ int ClientSession::handle_read()
     //每次读取前先清空m_buf
     memset(m_buf,0,sizeof(m_buf));
 
-
     char buf[128] = ""; //不直接用m_buf防止收到错误数据
     ssize_t res = recv(m_cfd, buf, sizeof(buf), 0);
     if(res > 0)

@@ -6,15 +6,16 @@
 //------------------------EpollReactor----------------------
 EpollReactor::EpollReactor(int sfd)
     : m_sfd(sfd),
-      m_subTimer(0)
+      m_subTimer(0),
+      m_threads(subMAXCnt)
 {
     for (int i = 0; i < subMAXCnt; i++)
     {
-        subReactors[i] = new SubReactor();
-        if(subReactors[i]->init() == false)
+        m_subReactors[i] = new SubReactor();
+        if(m_subReactors[i]->initSub() == false)
         {
-            delete subReactors[i];
-            subReactors[i] = nullptr;
+            delete m_subReactors[i];
+            m_subReactors[i] = nullptr;
         }
     }
 }
@@ -24,16 +25,15 @@ EpollReactor::~EpollReactor()
     for (int i = 0; i < subMAXCnt; ++i)
     {
         //应该先向当前线程发送停止信号，否则delete后停止信号文件描述符就不在了
+    
         uint64_t cnt = 1;
-        write(subReactors[i]->getStopFD(), &cnt, sizeof(cnt));
-        m_threads[i].join();
-
-        if (subReactors[i] != nullptr)
+        write(m_subReactors[i]->getStopFD(), &cnt, sizeof(cnt));
+        if(m_threads[i].joinable()) m_threads[i].join();
+        if (m_subReactors[i] != nullptr)
         {
-            delete subReactors[i];    // 释放单个对象
-            subReactors[i] = nullptr; // 置空防止悬空指针
+            delete m_subReactors[i];    // 释放单个对象
+            m_subReactors[i] = nullptr; // 置空防止悬空指针
         }
-
     }
 }
 
@@ -41,9 +41,10 @@ void EpollReactor::run()
 {
     for(int i =0;i < subMAXCnt;i++)
     {
-        if(subReactors[i] == nullptr)
+        if(m_subReactors[i] == nullptr)
         {
             printf("EpollReactor run error!\n");
+            return;
         }
     }
     if (!m_threads.empty())
@@ -53,7 +54,7 @@ void EpollReactor::run()
     // 创建线程，将线程和subReactor对应
     for (int i = 0; i < subMAXCnt; i++)
     {
-        m_threads.emplace_back(&SubReactor::reactor, subReactors[i], i);
+        m_threads.emplace_back(&SubReactor::reactor, m_subReactors[i], i);
     }
     sockaddr_in cin;
     socklen_t socklen = sizeof(cin);
@@ -69,13 +70,13 @@ void EpollReactor::run()
         }
         printf("[%s:%d] accept success\n", inet_ntoa(cin.sin_addr), ntohs(cin.sin_port)); // 测试函数，开发后删除
         // 有新连接来了,轮询sub
-        auto sub = subReactors[m_subTimer++ % subMAXCnt];
+        auto sub = m_subReactors[m_subTimer++ % subMAXCnt];
         // 儿子都在 wait阻塞呢，先将客户端信息放到他的连接队列中
         sub->addQueueConnFD(ConInfo{newfd, cin});
-
         uint64_t cnt = 1;
         // 唤醒儿子
-        write(sub->getWakeFD(), &cnt, sizeof(cnt));
+        write(sub->getWakeFD(), &cnt, sizeof(cnt)); 
+        //后续加入什么情况下，服务器要进行关闭
     }
 }
 //------------------------SubReactor----------------------
@@ -96,12 +97,18 @@ SubReactor::~SubReactor()
         delete p.second;
     }
     m_cliSessionsMap.clear();
+    while(!m_queueConnFD.empty())
+    {
+        auto tmp = m_queueConnFD.front();
+        close(tmp.m_fd);
+        m_queueConnFD.pop();
+    }
     close(m_wakeFD);
     close(m_stopSignalFD);
     close(m_epfd);
 }
 
-bool SubReactor::init()
+bool SubReactor::initSub()
 {
     createEpollFD();
     if(m_epfd == -1)
@@ -128,11 +135,15 @@ bool SubReactor::init()
         perror("m_wakeFD add to epoll error");
         return false;
     }
+
+    return true;
 }
 
 void SubReactor::addQueueConnFD(const ConInfo &info)
 {
+    mux.lock();//获取锁资源
     m_queueConnFD.push(info);
+    mux.unlock();//释放锁资源
 }
 
 int SubReactor::getWakeFD()
@@ -170,7 +181,10 @@ bool SubReactor::addToEpoll(int fd, sockaddr_in *cin)
         perror("epoll add error");
         return false;
     }
+
+    return true;
 }
+
 
 void SubReactor::removeEpollFD(int fd)
 {
@@ -213,8 +227,10 @@ void SubReactor::reactor(int reactorId)
                 read(m_wakeFD, &cnt, sizeof(cnt)); // 消耗事件
                 while (cnt-- != 0)
                 {
+                    mux.lock();//获取锁资源
                     ConInfo newConInfo = m_queueConnFD.front();
                     m_queueConnFD.pop();
+                    mux.unlock();//释放锁资源
                     addToEpoll(newConInfo.m_fd, &newConInfo.m_cin);
                     //创建session哈希表
                     m_cliSessionsMap.insert({newConInfo.m_fd,

@@ -53,5 +53,7 @@ target_include_directories(InternetChatRoomServer
 
 target_link_libraries(InternetChatRoomServer
     PRIVATE
-        pthread
+        Threads::Threads
 )
+
+find_package(Threads REQUIRED)

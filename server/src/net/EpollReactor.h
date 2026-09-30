@@ -6,9 +6,12 @@
 #include <unordered_map>
 #include <queue>
 #include <vector>
+#include <mutex>
 
 #define subMAXCnt 4
 #define subSessionMAXCnt 64
+
+std::mutex mux;
 
 // 定义新连接客户端信息结构体
 struct ConInfo
@@ -54,7 +57,7 @@ public:
     /*
         用于初始化，方便查看哪些创建失败
     */
-    bool init();
+    bool initSub();
 
     /*
         如何处理如果不同线程之间的客户端若是一个群聊或私聊要如何通信 ----Q3
@@ -134,7 +137,7 @@ private:
 
     int m_subTimer; // 主线程的时间片，轮询调用子线程
 
-    SubReactor *subReactors[subMAXCnt]; // 子线程处理函数
+    SubReactor *m_subReactors[subMAXCnt]; // 子线程处理函数
 
     std::vector<std::thread> m_threads; // 子线程数组
 };
