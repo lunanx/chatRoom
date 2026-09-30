@@ -11,7 +11,7 @@
 #define subMAXCnt 4
 #define subSessionMAXCnt 64
 
-std::mutex mux;
+extern std::mutex mux;
 
 // 定义新连接客户端信息结构体
 struct ConInfo

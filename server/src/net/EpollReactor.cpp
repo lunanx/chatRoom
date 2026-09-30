@@ -2,7 +2,9 @@
 #include <sys/eventfd.h>
 #include <string.h>
 #include <unistd.h>
-#include "EpollReactor.h"
+
+std::mutex mux;
+
 //------------------------EpollReactor----------------------
 EpollReactor::EpollReactor(int sfd)
     : m_sfd(sfd),
