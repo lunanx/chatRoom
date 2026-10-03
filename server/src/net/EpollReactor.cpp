@@ -2,7 +2,7 @@
 #include <sys/eventfd.h>
 #include <string.h>
 #include <unistd.h>
-
+#include <fcntl.h>
 std::mutex mux;
 
 //------------------------EpollReactor----------------------
@@ -96,8 +96,7 @@ bool EpollReactor::initMEpoll(int sfd)
 
 int EpollReactor::getMStopFD()
 {
-    if (m_MStopFD != -1)
-        return m_MStopFD;
+    return m_MStopFD;
 }
 
 void EpollReactor::createMEpollFD()
@@ -121,6 +120,25 @@ bool EpollReactor::addToMEpoll(int fd)
         return false;
     }
     return true;
+}
+
+int EpollReactor::setNonblocking(int fd)
+{
+    // 获取fd的文件描述符状态
+    int flags = fcntl(fd, F_GETFL, 0);
+    if (flags == -1)
+    {
+        perror("F_GETFL error");
+        return -1;
+    }
+
+    if (fcntl(fd, F_SETFL, flags | O_NONBLOCK) == -1)
+    {
+        perror("F_SETFL error");
+        return -1;
+    }
+
+    return 0;
 }
 
 void EpollReactor::run()
@@ -160,13 +178,22 @@ void EpollReactor::run()
                     return;
                 }
                 printf("[%s:%d] accept success\n", inet_ntoa(cin.sin_addr), ntohs(cin.sin_port)); // 测试函数，开发后删除
+                if (setNonblocking(newfd) == -1)
+                {
+                    printf("setNonblock error\n");
+                    return;
+                }
                 // 有新连接来了,轮询sub
                 auto sub = m_subReactors[m_subTimer++ % subMAXCnt];
                 // 儿子都在 wait阻塞呢，先将客户端信息放到他的连接队列中
                 sub->addQueueConnFD(ConInfo{newfd, cin});
                 uint64_t cnt = 1;
                 // 唤醒儿子
-                write(sub->getWakeFD(), &cnt, sizeof(cnt));
+                if (write(sub->getWakeFD(), &cnt, sizeof(cnt)) == -1)
+                {
+                    perror("Sub wake error");
+                    return;
+                }
             }
             // 控制端发来了停止信号
             else if (newfd == m_MStopFD)
@@ -258,14 +285,12 @@ void SubReactor::addQueueConnFD(const ConInfo &info)
 
 int SubReactor::getWakeFD()
 {
-    if (m_wakeFD == -1)
-        return m_wakeFD;
+    return m_wakeFD;
 }
 
 int SubReactor::getStopFD()
 {
-    if (m_stopSignalFD == -1)
-        return m_stopSignalFD;
+    return m_stopSignalFD;
 }
 
 void SubReactor::createEpollFD()
@@ -373,8 +398,8 @@ void SubReactor::reactor(int reactorId)
                 }
                 // 注意ClientSession里面封装了读写事件
                 // 下面都是测试用，下个阶段的时候删除，也就是在操作数据库的时候删除
-                ssize_t res = cli->second->handle_read(); // 读取客户端的消息
-                char *buf = cli->second->getbuf();        // 得到的是m_buf指针
+                int res = cli->second->handle_read(); // 读取客户端的消息
+                std::string buf = cli->second->getRecvBuf();
                 if (res == 0)
                 {
                     // 对端下线了，将fd从epoll中DEL
@@ -383,10 +408,23 @@ void SubReactor::reactor(int reactorId)
                 }
                 else if (res == -1)
                 {
+                    if (errno != EAGAIN && errno != EWOULDBLOCK)
+                        continue;
+                }
+                printf("客户端发送的数据为:%s\n", buf.data());
+                res = cli->second->handle_write(buf + "*_*");
+                if (res == 0)
+                {
+                    // 对端下线了，将fd从epoll中DEL
+                    removeEpollFD(newfd);
                     continue;
                 }
-                printf("客户端发送的数据为:%s\n", buf);
-                cli->second->handle_write(buf, strlen(buf));
+                else if (res == -1)
+                {
+                    if (errno != EAGAIN && errno != EWOULDBLOCK)
+                        continue;
+                }
+                printf("发送*_*成功\n");
             }
         }
     }

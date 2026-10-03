@@ -24,11 +24,18 @@ public:
     /*
         初始化服务器
     */
-    void init();
+    bool init();
     /*
-        关闭服务器
+        stop()负责启动服务器停止流程；
+        对象停止并退出运行后，析构函数负责完成最终资源回收。
+        析构函数中的 stop()属于防御性兜底。
     */
     void stop();
+
+    /*
+        开始运行服务器
+    */
+    void start();
 
 private:
     int myBind();

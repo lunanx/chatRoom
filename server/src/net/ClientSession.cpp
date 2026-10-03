@@ -5,6 +5,8 @@ ClientSession::ClientSession(int cfd, sockaddr_in *cin)
     : m_cfd(cfd),
       m_caddr(*cin)
 {
+    m_writeBuf.clear();
+    m_recvBuf.clear();
 }
 
 ClientSession::~ClientSession()
@@ -13,34 +15,62 @@ ClientSession::~ClientSession()
         close(m_cfd);
 }
 
-void ClientSession::handle_write(const char *buf, size_t len)
+int ClientSession::handle_write(const std::string &data)
 {
 
-    if (send(m_cfd, buf, len, 0) == -1)
+    // 将新数据写入缓冲，可能还残留上次未发送的数据
+    m_writeBuf.append(data);
+
+    // 尝试把整个发送端缓冲区发送出去
+    while (!m_writeBuf.empty())
     {
-        perror("send error");
-        return;
+        ssize_t res = send(m_cfd, m_writeBuf.data(), m_writeBuf.size(), 0);
+        if (res > 0)
+        {
+            //移除发送的部分
+            m_writeBuf.erase(0,static_cast<size_t>(res));
+        }
+        else if (res == 0)
+        {
+            printf("对端已下线\n");
+            return 0;
+        }
+        else
+        {
+            if (errno == EINTR)
+            {
+                //信号被打断，重新send
+                continue;
+            }
+            else if (errno == EAGAIN || errno == EWOULDBLOCK)
+            {
+                //当前发送不出去
+                //保存剩余数据
+                //等待下次epoll
+                return -1;
+            }
+            else
+            {
+                perror("send error");
+                return -1;
+            }
+        }
     }
+    return 1;
 }
 
-ssize_t ClientSession::handle_read()
+int ClientSession::handle_read()
 {
-    // 每次读取前先清空m_buf
-    memset(m_buf, 0, sizeof(m_buf));
-    char buf[128] = ""; // 不直接用m_buf防止收到错误数据
-    // 目前就设置只读一次吧，之后再考虑循环问题。
+    char buf[128] = ""; // 每次读取128字节
     while (1)
     {
+        // 每次读取前先需要将buf清空
+        memset(buf, 0, sizeof(buf));
         ssize_t res = recv(m_cfd, buf, sizeof(buf), 0);
         if (res > 0)
         {
-            // 实际收到字节数
-            size_t n = static_cast<size_t>(res);
-            if (n <= (size_t)BUFSIZE)
-            {
-                memcpy(m_buf, buf, n);
-            }
-            return res;
+            // 有多少读多少，不需要考虑其他，其他层会判断
+            m_recvBuf.append(buf);
         }
         else if (res == 0)
         {
@@ -65,6 +95,7 @@ ssize_t ClientSession::handle_read()
             }
         }
     }
+    return 1;
 }
 
 int ClientSession::getClientSocket()
@@ -77,7 +108,12 @@ sockaddr_in ClientSession::getAddr()
     return m_caddr;
 }
 
-char *ClientSession::getbuf()
+std::string ClientSession::getWriteBuf()
 {
-    return m_buf;
+    return m_writeBuf;
+}
+
+std::string ClientSession::getRecvBuf()
+{
+    return m_recvBuf;
 }

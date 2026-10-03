@@ -4,6 +4,9 @@ int main(int argc, char const *argv[])
 {
 
     TcpServer server;
-    server.init();
+    if(server.init())
+    {
+        server.start();
+    }
     return 0;
 }

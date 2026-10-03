@@ -1,13 +1,11 @@
 #pragma once
 
 #include <iostream>
+#include <string>
 #include <sys/types.h>
 #include <sys/socket.h>
 #include <netinet/in.h>
 #include <arpa/inet.h>
-
-#define BUFSIZE 4096
-
 /*
     该类用于与客户端通信
 
@@ -26,15 +24,13 @@ public:
     */
     ~ClientSession();
     /*
-        服务端向客户端发送len长度的buf数据,目前阶段只做简单测试
-        后续得考虑JSON数据
+        将发送端字节流发送
     */
-    void handle_write(const char *buf, size_t len);
+    int handle_write(const std::string& data);
     /*
-        服务端从客户端接收数据，目前阶段只做简单测试
-        后续得考虑JSON数据
+        从接收端读取字节流，可能会读取A的一部分+B的一部分，所以每次读取不应该清空。
     */
-    ssize_t handle_read();
+    int handle_read();
     /*
         用于外部获取客户端套接字
     */
@@ -44,13 +40,21 @@ public:
     */
     sockaddr_in getAddr(); // 获取m_addr
     /*
-        用于外部获取客户端的消息
+        用于外部获取发送端数据
     */
-    char *getbuf(); // 获取m_buf
+    std::string getWriteBuf();
+    /*
+        用于外部获取接收端数据
+    */
+    std::string getRecvBuf();
+
+
 private:
     int m_cfd; // 客户端套接字
 
-    char m_buf[BUFSIZE]; // 当前阶段用char* 类型进行简单通信测试，后续要改成JSON
+    std::string m_writeBuf; // 发送端缓冲区数据
+
+    std::string m_recvBuf; // 接收端缓冲区数据
 
     struct sockaddr_in m_caddr; // 客户端地址信息
 };

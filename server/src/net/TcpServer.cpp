@@ -15,49 +15,50 @@ TcpServer::TcpServer()
 
 TcpServer::~TcpServer()
 {
-
+    stop();//如果已经stop过了，第二次的stop也没事，这样的设计就是让stop具备幂等性
+    delete m_epollReactor;
+    m_epollReactor = nullptr;
     if (m_sfd != -1)
     {
         close(m_sfd);
     }
-    stop();
-    delete m_epollReactor;
-    m_epollReactor = nullptr;
 }
 
-void TcpServer::init()
+bool TcpServer::init()
 {
 
     m_sfd = socket(AF_INET, SOCK_STREAM, 0);
     if (m_sfd == -1)
     {
         perror("socket create error");
-        return;
+        return false;
     }
 
     int opt = 1;
     if (setsockopt(m_sfd, SOL_SOCKET, SO_REUSEADDR, &opt, sizeof(opt)) == -1)
     {
         perror("setsockopt error");
-        return;
+        return false;
     }
 
     if (myBind() == -1)
     {
-        return;
+        return false;
     }
     if (myListen() == -1)
     {
-        return;
+        return false;
     }
 
     m_epollReactor = new EpollReactor();
+
     if (m_epollReactor->initMEpoll(m_sfd) == false)
     {
-        return;
+        return false;
     }
+
     m_isInit = true;
-    m_epollReactor->run();
+    return true;
 }
 
 void TcpServer::stop()
@@ -65,7 +66,20 @@ void TcpServer::stop()
     if (m_isInit)
     {
         uint64_t cnt = 1;
-        write(m_epollReactor->getMStopFD(), &cnt, sizeof(cnt));
+        if(write(m_epollReactor->getMStopFD(), &cnt, sizeof(cnt)) == -1)
+        {
+            perror("write epoll MainReactor's stopFD error");
+            return;
+        }
+        m_isInit = false;
+    }
+}
+
+void TcpServer::start()
+{
+    if(m_isInit)
+    {
+        m_epollReactor->run();
     }
 }
 
