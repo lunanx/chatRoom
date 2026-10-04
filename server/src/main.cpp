@@ -1,6 +1,6 @@
 #include "net/TcpServer.h"
 
-int main(int argc, char const *argv[])
+int main()
 {
 
     TcpServer server;

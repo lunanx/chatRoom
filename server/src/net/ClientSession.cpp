@@ -56,6 +56,7 @@ int ClientSession::handle_write(const std::string &data)
             }
         }
     }
+    return 1;
 }
 
 int ClientSession::handle_read()

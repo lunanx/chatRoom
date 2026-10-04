@@ -22,6 +22,16 @@
     Header总长度: 20 bytes
 
     整数用网络字节序---通过主机转网络
+    --------------------------------------------
+    对于request_id:
+        客户端主动请求：
+            request_id = 客户端生成的唯一请求编号
+
+            服务器回复：
+            request_id = 原请求的 request_id
+
+            服务器主动推送：
+            request_id = 0
 
 */
 namespace protocolHeader
@@ -105,6 +115,11 @@ namespace protocolHeader
         std::uint64_t request_id;
     };
 #pragma pack(pop)
+    /*
+        协议保护尺寸
+    */
+    static_assert(sizeof(Header) == 20, "Protocol Header size must be 20 bytes");
+
     /*
         Header长度
     */

@@ -7,15 +7,15 @@
 
 TcpServer::TcpServer()
     : m_sfd(-1),
-      m_epollReactor(nullptr),
       m_isInit(false),
-      m_saddr{AF_INET, htons(SERVER_HOST_PORT), {inet_addr(SERVER_HOST_ADDR)}}
+      m_saddr{AF_INET, htons(SERVER_HOST_PORT), {inet_addr(SERVER_HOST_ADDR)}},
+      m_epollReactor(nullptr)
 {
 }
 
 TcpServer::~TcpServer()
 {
-    stop();//如果已经stop过了，第二次的stop也没事，这样的设计就是让stop具备幂等性
+    stop(); // 如果已经stop过了，第二次的stop也没事，这样的设计就是让stop具备幂等性
     delete m_epollReactor;
     m_epollReactor = nullptr;
     if (m_sfd != -1)
@@ -66,7 +66,7 @@ void TcpServer::stop()
     if (m_isInit)
     {
         uint64_t cnt = 1;
-        if(write(m_epollReactor->getMStopFD(), &cnt, sizeof(cnt)) == -1)
+        if (write(m_epollReactor->getMStopFD(), &cnt, sizeof(cnt)) == -1)
         {
             perror("write epoll MainReactor's stopFD error");
             return;
@@ -77,7 +77,7 @@ void TcpServer::stop()
 
 void TcpServer::start()
 {
-    if(m_isInit)
+    if (m_isInit)
     {
         m_epollReactor->run();
     }
