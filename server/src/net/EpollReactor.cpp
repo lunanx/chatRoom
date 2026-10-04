@@ -400,29 +400,35 @@ void SubReactor::reactor(int reactorId)
                 // 下面都是测试用，下个阶段的时候删除，也就是在操作数据库的时候删除
                 int res = cli->second->handle_read(); // 读取客户端的消息
                 std::string buf = cli->second->getRecvBuf();
-                if (res == 0)
+                if (res == 0) // 对端下线了，将fd从epoll中DEL
                 {
-                    // 对端下线了，将fd从epoll中DEL
                     removeEpollFD(newfd);
                     continue;
                 }
-                else if (res == -1)
+                else if (res == 1) // 暂无数据
                 {
-                    if (errno != EAGAIN && errno != EWOULDBLOCK)
-                        continue;
+                    continue;
+                }
+                else if (res == -1) // 有错误
+                {
+                    printf("handle_read error\n");
+                    return;
                 }
                 printf("客户端发送的数据为:%s\n", buf.data());
                 res = cli->second->handle_write(buf + "*_*");
-                if (res == 0)
+                if (res == 0) // 对端下线了，将fd从epoll中DEL
                 {
-                    // 对端下线了，将fd从epoll中DEL
                     removeEpollFD(newfd);
                     continue;
                 }
-                else if (res == -1)
+                else if (res == 1) // 暂无数据
                 {
-                    if (errno != EAGAIN && errno != EWOULDBLOCK)
-                        continue;
+                    continue;
+                }
+                else if (res == -1) // 有错误
+                {
+                    printf("handle_write error\n");
+                    return;
                 }
                 printf("发送*_*成功\n");
             }

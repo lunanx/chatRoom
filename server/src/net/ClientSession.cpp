@@ -27,8 +27,8 @@ int ClientSession::handle_write(const std::string &data)
         ssize_t res = send(m_cfd, m_writeBuf.data(), m_writeBuf.size(), 0);
         if (res > 0)
         {
-            //移除发送的部分
-            m_writeBuf.erase(0,static_cast<size_t>(res));
+            // 移除发送的部分
+            m_writeBuf.erase(0, static_cast<size_t>(res));
         }
         else if (res == 0)
         {
@@ -39,15 +39,15 @@ int ClientSession::handle_write(const std::string &data)
         {
             if (errno == EINTR)
             {
-                //信号被打断，重新send
+                // 信号被打断，重新send
                 continue;
             }
             else if (errno == EAGAIN || errno == EWOULDBLOCK)
             {
-                //当前发送不出去
-                //保存剩余数据
-                //等待下次epoll
-                return -1;
+                // 当前发送不出去
+                // 保存剩余数据
+                // 等待下次epoll
+                return 1;
             }
             else
             {
@@ -56,7 +56,6 @@ int ClientSession::handle_write(const std::string &data)
             }
         }
     }
-    return 1;
 }
 
 int ClientSession::handle_read()
@@ -64,13 +63,11 @@ int ClientSession::handle_read()
     char buf[128] = ""; // 每次读取128字节
     while (1)
     {
-        // 每次读取前先需要将buf清空
-        memset(buf, 0, sizeof(buf));
         ssize_t res = recv(m_cfd, buf, sizeof(buf), 0);
         if (res > 0)
         {
             // 有多少读多少，不需要考虑其他，其他层会判断
-            m_recvBuf.append(buf);
+            m_recvBuf.append(buf, static_cast<size_t>(res));
         }
         else if (res == 0)
         {
@@ -85,8 +82,8 @@ int ClientSession::handle_read()
             }
             else if (errno == EAGAIN || errno == EWOULDBLOCK)
             {
-                printf("数据读干净了\n");
-                return -1;
+                printf("数据读干净了，暂无数据\n");
+                return 1;
             }
             else
             {
@@ -95,7 +92,6 @@ int ClientSession::handle_read()
             }
         }
     }
-    return 1;
 }
 
 int ClientSession::getClientSocket()
