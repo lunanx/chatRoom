@@ -1,3 +1,5 @@
+#pragma once
+
 #include <cstdint>
 #include <cstddef>
 
@@ -11,8 +13,8 @@
     magic         4 bytes
     version       2 bytes
     command       2 bytes
-    request_id    8 bytes
     body_length   4 bytes
+    request_id    8 bytes
     ----------Body-------------------
         JSON UTF-8
     ---------------------------------
@@ -62,20 +64,20 @@ namespace protocolHeader
         /*
             群聊消息
         */
-        PUBLIC_MESSAGE_SEND = 10,
-        PUBLIC_MESSAGE_RECV = 11,
+        GROUP_MESSAGE_SEND = 10,
+        GROUP_MESSAGE_RECV = 11,
 
         /*
             私聊消息
         */
-        PRIVATE_MESSAGE_SEND = 16,
-        PRIVATE_MESSAGE_RECV = 17,
+        PRIVATE_MESSAGE_SEND = 12,
+        PRIVATE_MESSAGE_RECV = 13,
 
         /*
             用户上线 / 下线
         */
-        USER_JOIN = 18,
-        USER_LEAVE = 19,
+        USER_JOIN = 14,
+        USER_LEAVE = 15,
     };
 
     /*
@@ -85,6 +87,10 @@ namespace protocolHeader
    */
     constexpr std::uint32_t MAX_BODY_LENGTH = 1024 * 1024;
 
+    /*
+        当前版本协议
+    */
+    constexpr std::uint16_t VERSION = 1;
 
 #pragma pack(push, 1)
     /*
@@ -98,7 +104,7 @@ namespace protocolHeader
         std::uint32_t body_length;
         std::uint64_t request_id;
     };
-
+#pragma pack(pop)
     /*
         Header长度
     */

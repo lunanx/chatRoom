@@ -49,6 +49,7 @@ add_executable(InternetChatRoomServer
 target_include_directories(InternetChatRoomServer
     PRIVATE
         ${CMAKE_CURRENT_SOURCE_DIR}/src
+        
 )
 
 target_link_libraries(InternetChatRoomServer
