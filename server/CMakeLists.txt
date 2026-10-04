@@ -46,8 +46,8 @@ add_executable(InternetChatRoomServer
     src/repository/MessageRepository.cpp
     src/repository/MessageRepository.h
 
-    src/protocol/Protocol.cpp
-    src/protocol/Protocol.h
+    src/protocol/FrameDecoder.cpp
+    src/protocol/FrameDecoder.h
 )
 
 target_include_directories(InternetChatRoomServer

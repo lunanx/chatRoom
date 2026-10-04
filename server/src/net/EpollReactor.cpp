@@ -1,8 +1,10 @@
 #include "EpollReactor.h"
+#include "protocol/FrameDecoder.h"
 #include <sys/eventfd.h>
 #include <string.h>
 #include <unistd.h>
 #include <fcntl.h>
+
 std::mutex mux;
 
 //------------------------EpollReactor----------------------
@@ -213,7 +215,8 @@ SubReactor::SubReactor()
       m_stopSignalFD(-1),
       m_queueConnFD(),
       m_cliSessionsMap(),
-      m_evs{}
+      m_evs{},
+      m_decoder(new FrameDecoder)
 {
 }
 
@@ -236,6 +239,8 @@ SubReactor::~SubReactor()
         delete p.second;
     }
     m_cliSessionsMap.clear();
+
+    delete m_decoder;
 
     if (m_wakeFD != -1)
         close(m_wakeFD);
@@ -397,7 +402,6 @@ void SubReactor::reactor(int reactorId)
                     continue;
                 }
                 // 注意ClientSession里面封装了读写事件
-                // 下面都是测试用，下个阶段的时候删除，也就是在操作数据库的时候删除
                 int res = cli->second->handle_read(); // 读取客户端的消息
                 std::string buf = cli->second->getRecvBuf();
                 if (res == 0) // 对端下线了，将fd从epoll中DEL
@@ -414,23 +418,20 @@ void SubReactor::reactor(int reactorId)
                     printf("handle_read error\n");
                     return;
                 }
-                printf("客户端发送的数据为:%s\n", buf.data());
-                res = cli->second->handle_write(buf + "*_*");
-                if (res == 0) // 对端下线了，将fd从epoll中DEL
+                // 将buf传给Decoder解析
+                res = m_decoder->parseBufPacket(buf);
+                if (res == -1)
                 {
-                    removeEpollFD(newfd);
+                    // 数据有错误，该咋办,有点摸不准,但cli.m_recvBuf还是错误数据，如何处理问一下AI,我想着是清空m_recvBuf。这里先不实现
+                }
+                else if (res == 0)
+                {
                     continue;
                 }
-                else if (res == 1) // 暂无数据
+                else  // 就剩1了，这里应该就是要根据requestId 和 command分发了，也是先不实现 
                 {
-                    continue;
+
                 }
-                else if (res == -1) // 有错误
-                {
-                    printf("handle_write error\n");
-                    return;
-                }
-                printf("发送*_*成功\n");
             }
         }
     }
