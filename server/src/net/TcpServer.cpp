@@ -12,8 +12,8 @@ TcpServer::TcpServer()
       m_epollReactor(nullptr)
 {
     m_saddr.sin_family = AF_INET;
-    m_saddr.sin_addr.s_addr = htons(SERVER_HOST_PORT);
-    m_saddr.sin_port = inet_addr(SERVER_HOST_ADDR);
+    m_saddr.sin_addr.s_addr = inet_addr(SERVER_HOST_ADDR);
+    m_saddr.sin_port = htons(SERVER_HOST_PORT);
 }
 
 TcpServer::~TcpServer()
