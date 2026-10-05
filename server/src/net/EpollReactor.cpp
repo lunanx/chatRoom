@@ -6,16 +6,15 @@
 #include <fcntl.h>
 
 std::mutex mux;
-
 //------------------------EpollReactor----------------------
 EpollReactor::EpollReactor()
     : m_sfd(-1),
       m_subTimer(0),
-      m_threads(subMAXCnt),
-      m_MEpfd(-1),
       m_MStopFD(-1),
+      m_MEpfd(-1),
       m_MEvs{},
-      m_subReactors{}
+      m_subReactors{},
+      m_threads(subMAXCnt)
 {
 }
 
@@ -208,10 +207,26 @@ void EpollReactor::run()
     }
 }
 
+/*
+    int m_wakeFD; // 用于老爹唤醒
+
+    int m_epfd; // 每个线程独自的epoll套接字
+
+    int m_stopSignalFD; // 用于老爹调用自己的析构函数，提醒孩子该退出线程了
+
+    std::queue<ConInfo> m_queueConnFD; // 接收老爹的新连接
+
+    std::unordered_map<int, ClientSession *> m_cliSessionsMap; // 这里用哈希表可以快速查询到，也便于插入和删除
+
+    epoll_event m_evs[subSessionMAXCnt]; // 每个线程产生的文件描述符集合
+
+    FrameDecoder m_decoder; // 解析器
+*/
+
 //------------------------SubReactor----------------------
 SubReactor::SubReactor()
-    : m_epfd(-1),
-      m_wakeFD(-1),
+    : m_wakeFD(-1),
+      m_epfd(-1),
       m_stopSignalFD(-1),
       m_queueConnFD(),
       m_cliSessionsMap(),
@@ -400,7 +415,7 @@ void SubReactor::reactor(int reactorId)
                 }
                 // 注意ClientSession里面封装了读写事件
                 int res = cli->second->handle_read(); // 读取客户端的消息
-                std::string& buf = cli->second->getRecvBuf();
+                std::string &buf = cli->second->getRecvBuf();
                 if (res == 0) // 对端下线了，将fd从epoll中DEL
                 {
                     removeEpollFD(newfd);
@@ -429,10 +444,10 @@ void SubReactor::reactor(int reactorId)
                     }
                     else if (status == DecoderStatus::PacketReady)
                     {
-                        //处理frame，但具体还未实现，先写主要架构
-                        //主要实现的时候注意，outputFrame是局部变量
-                        
-                        //然后继续解析
+                        // 处理frame，但具体还未实现，先写主要架构
+                        // 主要实现的时候注意，outputFrame是局部变量
+
+                        // 然后继续解析
                         continue;
                     }
                 }

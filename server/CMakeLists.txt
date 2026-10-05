@@ -60,7 +60,7 @@ target_link_libraries(InternetChatRoomServer
     PRIVATE
         Threads::Threads
 )
-
+# 开启编译警告  方便进一步学习C++
 target_compile_options(InternetChatRoomServer 
     PRIVATE
         -Wall

@@ -92,17 +92,17 @@ private:
 
     // void modifyEpollFD(); 这个当前阶段先不实现，之后在考虑
 
-    std::queue<ConInfo> m_queueConnFD; // 接收老爹的新连接
-
-    std::unordered_map<int, ClientSession *> m_cliSessionsMap; // 这里用哈希表可以快速查询到，也便于插入和删除
-
-    epoll_event m_evs[subSessionMAXCnt]; // 每个线程产生的文件描述符集合
-
     int m_wakeFD; // 用于老爹唤醒
 
     int m_epfd; // 每个线程独自的epoll套接字
 
     int m_stopSignalFD; // 用于老爹调用自己的析构函数，提醒孩子该退出线程了
+
+    std::queue<ConInfo> m_queueConnFD; // 接收老爹的新连接
+
+    std::unordered_map<int, ClientSession *> m_cliSessionsMap; // 这里用哈希表可以快速查询到，也便于插入和删除
+
+    epoll_event m_evs[subSessionMAXCnt]; // 每个线程产生的文件描述符集合
 
     FrameDecoder m_decoder; // 解析器
 };
