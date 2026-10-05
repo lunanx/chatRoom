@@ -9,8 +9,8 @@
 #include <vector>
 #include <mutex>
 
-#define subMAXCnt 4
-#define subSessionMAXCnt 64
+constexpr int subMAXCnt = 4;
+constexpr int subSessionMAXCnt = 64;
 
 extern std::mutex mux;
 
@@ -18,9 +18,9 @@ extern std::mutex mux;
 struct ConInfo
 {
     ConInfo(int fd, sockaddr_in cin)
+        : m_fd(fd),
+          m_cin(cin)
     {
-        m_fd = fd;
-        m_cin = cin;
     }
     int m_fd;
     sockaddr_in m_cin;
@@ -90,7 +90,13 @@ private:
     */
     void removeEpollFD(int fd);
 
-    // void modifyEpollFD(); 这个当前阶段先不实现，之后在考虑
+    /*
+        修改fd属性
+        参数
+            int fd: 需要修改的文件描述符
+            uint32_t events: 需要修改成什么样的属性
+    */
+    bool modifyEpollFD(int fd, uint32_t events);
 
     int m_wakeFD; // 用于老爹唤醒
 
@@ -104,7 +110,7 @@ private:
 
     epoll_event m_evs[subSessionMAXCnt]; // 每个线程产生的文件描述符集合
 
-    FrameDecoder m_decoder; // 解析器
+    FrameDecoder m_decoder; // 解包器
 };
 
 /*

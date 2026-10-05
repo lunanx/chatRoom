@@ -18,7 +18,7 @@ public:
     /*
         构造函数
     */
-    ClientSession(int cfd, sockaddr_in *cin);
+    ClientSession(int cfd, sockaddr_in cin);
     /*
         析构函数，这里用于关闭客户端的套接字
     */

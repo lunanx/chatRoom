@@ -1,12 +1,10 @@
 #include "ClientSession.h"
 #include <string.h>
 #include <unistd.h>
-ClientSession::ClientSession(int cfd, sockaddr_in *cin)
+ClientSession::ClientSession(int cfd, sockaddr_in cin)
     : m_cfd(cfd),
-      m_caddr(*cin)
+      m_caddr(cin)
 {
-    m_writeBuf.clear();
-    m_recvBuf.clear();
 }
 
 ClientSession::~ClientSession()

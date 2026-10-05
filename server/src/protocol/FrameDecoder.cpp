@@ -4,7 +4,7 @@
 #include <cstdint>
 #include <endian.h>
 
-DecoderStatus FrameDecoder::parseBufPacket(std::string &bufPacket, struct DecodedFrame &outputFrame)
+DecoderStatus FrameDecoder::parseBufPacket(std::string &bufPacket, struct DecodedFrame &outputFrame, size_t &offset)
 {
     if (bufPacket.size() >= protocolHeader::HEADER_SIZE)
     {
@@ -33,11 +33,12 @@ DecoderStatus FrameDecoder::parseBufPacket(std::string &bufPacket, struct Decode
             return DecoderStatus::NeedMoreData;
         }
         // 得到一个完整的Frame,其实只需要有 command、request_id 和 body
-        outputFrame.m_command = static_cast<protocolHeader::CommandType>(ntohs(header.command));
+        outputFrame.m_command = static_cast<std::uint16_t>(ntohs(header.command));
         outputFrame.m_requestId = be64toh(header.request_id);
-        outputFrame.m_body = bufPacket.substr(protocolHeader::HEADER_SIZE,bodyLength);
-        // 从缓冲区删除这个Frame
-        bufPacket.erase(0, protocolHeader::HEADER_SIZE + bodyLength);
+        outputFrame.m_body = bufPacket.substr(protocolHeader::HEADER_SIZE, bodyLength);
+        // 修改offset
+        offset += protocolHeader::HEADER_SIZE + bodyLength;
+
         return DecoderStatus::PacketReady;
     }
 

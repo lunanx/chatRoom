@@ -4,6 +4,7 @@
 #include <sys/socket.h>
 #include <netinet/in.h>
 #include <arpa/inet.h>
+#include <fcntl.h>
 
 TcpServer::TcpServer()
     : m_sfd(-1),
@@ -29,11 +30,25 @@ TcpServer::~TcpServer()
 
 bool TcpServer::init()
 {
-
     m_sfd = socket(AF_INET, SOCK_STREAM, 0);
     if (m_sfd == -1)
     {
         perror("socket create error");
+        return false;
+    }
+
+    // 获取m_sfd的状态
+    int flags = fcntl(m_sfd, F_GETFL, 0);
+    if (flags == -1)
+    {
+        perror("fcntl F_GETFL error");
+        return false;
+    }
+    // 设置m_sfd为非阻塞
+    // 这样的话就不会卡住线程
+    if (fcntl(m_sfd, F_SETFL, flags | O_NONBLOCK) == -1)
+    {
+        perror("fcntl F_SETFL O_NONBLOCK error");
         return false;
     }
 
