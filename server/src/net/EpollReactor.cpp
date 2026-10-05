@@ -409,28 +409,34 @@ void SubReactor::reactor(int reactorId)
                     removeEpollFD(newfd);
                     continue;
                 }
-                else if (res == 1) // 暂无数据
-                {
-                    continue;
-                }
                 else if (res == -1) // 有错误
                 {
                     printf("handle_read error\n");
-                    return;
+                    removeEpollFD(cli->first);
                 }
-                // 将buf传给Decoder解析
-                res = m_decoder->parseBufPacket(buf);
-                if (res == -1)
+                while (1)
                 {
-                    // 数据有错误，该咋办,有点摸不准,但cli.m_recvBuf还是错误数据，如何处理问一下AI,我想着是清空m_recvBuf。这里先不实现
-                }
-                else if (res == 0)
-                {
-                    continue;
-                }
-                else  // 就剩1了，这里应该就是要根据requestId 和 command分发了，也是先不实现 
-                {
-
+                    // 将buf传给Decoder解析
+                    Packet outputFrame;
+                    DecoderStatus status = m_decoder->parseBufPacket(buf, outputFrame);
+                    if (status == DecoderStatus::ProtocolError)
+                    {
+                        // 客户端发的数据有问题，关闭客户端
+                        removeEpollFD(cli->first);
+                        break;
+                    }
+                    else if (status == DecoderStatus::NeedMoreData)
+                    {
+                        break;
+                    }
+                    else if (status == DecoderStatus::PacketReady)
+                    {
+                        //处理frame，但具体还未实现，先写主要架构
+                        //主要实现的时候注意，outputFrame是局部变量
+                        m_decoded->allocate(outputFrame);
+                        //然后继续解析
+                        continue;
+                    }
                 }
             }
         }

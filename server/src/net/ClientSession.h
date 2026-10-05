@@ -46,7 +46,7 @@ public:
     /*
         用于外部获取接收端数据
     */
-    std::string getRecvBuf();
+    std::string& getRecvBuf();
 
 
 private:

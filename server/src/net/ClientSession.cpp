@@ -110,7 +110,7 @@ std::string ClientSession::getWriteBuf()
     return m_writeBuf;
 }
 
-std::string ClientSession::getRecvBuf()
+std::string& ClientSession::getRecvBuf()
 {
     return m_recvBuf;
 }

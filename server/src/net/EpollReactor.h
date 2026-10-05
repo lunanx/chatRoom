@@ -2,6 +2,7 @@
 
 #include "protocol/FrameDecoder.h"
 #include "ClientSession.h"
+#include "protocol/DecodedFrame.h"
 #include <thread>
 #include <sys/epoll.h>
 #include <unordered_map>
@@ -104,7 +105,9 @@ private:
 
     int m_stopSignalFD; // 用于老爹调用自己的析构函数，提醒孩子该退出线程了
 
-    FrameDecoder *m_decoder;// 解析数据对象
+    FrameDecoder *m_decoder; // 解析器
+
+    DecodedFrame *m_decoded; // 分发器
 };
 
 /*
@@ -173,6 +176,4 @@ private:
     SubReactor *m_subReactors[subMAXCnt]; // 子线程处理函数
 
     std::vector<std::thread> m_threads; // 子线程数组
-
-
 };
