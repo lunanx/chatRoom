@@ -2,7 +2,6 @@
 
 #include "protocol/FrameDecoder.h"
 #include "ClientSession.h"
-#include "protocol/DecodedFrame.h"
 #include <thread>
 #include <sys/epoll.h>
 #include <unordered_map>
@@ -105,9 +104,7 @@ private:
 
     int m_stopSignalFD; // 用于老爹调用自己的析构函数，提醒孩子该退出线程了
 
-    FrameDecoder *m_decoder; // 解析器
-
-    DecodedFrame *m_decoded; // 分发器
+    FrameDecoder m_decoder; // 解析器
 };
 
 /*

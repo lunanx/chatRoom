@@ -4,7 +4,7 @@
 #include <cstdint>
 #include <endian.h>
 
-DecoderStatus FrameDecoder::parseBufPacket(std::string &bufPacket, struct Packet &outputFrame)
+DecoderStatus FrameDecoder::parseBufPacket(std::string &bufPacket, struct DecodedFrame &outputFrame)
 {
     if (bufPacket.size() >= protocolHeader::HEADER_SIZE)
     {
@@ -17,7 +17,7 @@ DecoderStatus FrameDecoder::parseBufPacket(std::string &bufPacket, struct Packet
             return DecoderStatus::ProtocolError;
         }
         // 检查version
-        if (ntohs(header.version) != static_cast<std::uint16_t>(1))
+        if (ntohs(header.version) != protocolHeader::VERSION)
         {
             return DecoderStatus::ProtocolError;
         }

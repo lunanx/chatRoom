@@ -215,8 +215,7 @@ SubReactor::SubReactor()
       m_stopSignalFD(-1),
       m_queueConnFD(),
       m_cliSessionsMap(),
-      m_evs{},
-      m_decoder(new FrameDecoder)
+      m_evs{}
 {
 }
 
@@ -239,8 +238,6 @@ SubReactor::~SubReactor()
         delete p.second;
     }
     m_cliSessionsMap.clear();
-
-    delete m_decoder;
 
     if (m_wakeFD != -1)
         close(m_wakeFD);
@@ -403,7 +400,7 @@ void SubReactor::reactor(int reactorId)
                 }
                 // 注意ClientSession里面封装了读写事件
                 int res = cli->second->handle_read(); // 读取客户端的消息
-                std::string buf = cli->second->getRecvBuf();
+                std::string& buf = cli->second->getRecvBuf();
                 if (res == 0) // 对端下线了，将fd从epoll中DEL
                 {
                     removeEpollFD(newfd);
@@ -412,17 +409,18 @@ void SubReactor::reactor(int reactorId)
                 else if (res == -1) // 有错误
                 {
                     printf("handle_read error\n");
-                    removeEpollFD(cli->first);
+                    removeEpollFD(newfd);
+                    continue;
                 }
                 while (1)
                 {
                     // 将buf传给Decoder解析
-                    Packet outputFrame;
-                    DecoderStatus status = m_decoder->parseBufPacket(buf, outputFrame);
+                    DecodedFrame outputFrame;
+                    DecoderStatus status = m_decoder.parseBufPacket(buf, outputFrame);
                     if (status == DecoderStatus::ProtocolError)
                     {
                         // 客户端发的数据有问题，关闭客户端
-                        removeEpollFD(cli->first);
+                        removeEpollFD(newfd);
                         break;
                     }
                     else if (status == DecoderStatus::NeedMoreData)
@@ -433,7 +431,7 @@ void SubReactor::reactor(int reactorId)
                     {
                         //处理frame，但具体还未实现，先写主要架构
                         //主要实现的时候注意，outputFrame是局部变量
-                        m_decoded->allocate(outputFrame);
+                        
                         //然后继续解析
                         continue;
                     }

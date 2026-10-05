@@ -48,8 +48,6 @@ add_executable(InternetChatRoomServer
 
     src/protocol/FrameDecoder.cpp
     src/protocol/FrameDecoder.h
-    src/protocol/DecodedFrame.h
-    src/protocol/DecodedFrame.cpp
 )
 
 target_include_directories(InternetChatRoomServer
@@ -61,4 +59,11 @@ target_include_directories(InternetChatRoomServer
 target_link_libraries(InternetChatRoomServer
     PRIVATE
         Threads::Threads
+)
+
+target_compile_options(InternetChatRoomServer 
+    PRIVATE
+        -Wall
+        -Wextra
+        -Wpedantic
 )

@@ -8,9 +8,12 @@
 TcpServer::TcpServer()
     : m_sfd(-1),
       m_isInit(false),
-      m_saddr{AF_INET, htons(SERVER_HOST_PORT), {inet_addr(SERVER_HOST_ADDR)}},
+      m_saddr{},
       m_epollReactor(nullptr)
 {
+    m_saddr.sin_family = AF_INET;
+    m_saddr.sin_addr.s_addr = htons(SERVER_HOST_PORT);
+    m_saddr.sin_port = inet_addr(SERVER_HOST_ADDR);
 }
 
 TcpServer::~TcpServer()
