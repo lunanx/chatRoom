@@ -18,7 +18,10 @@ struct DecodedFrame
     std::uint64_t m_requestId;
 };
 
-// 将FrameDecoder设置为无状态，只用作解析数据。
+/*
+    将客户端数据包解析
+    此类设置为无成员变量，避免新Frame覆盖旧Frame
+*/
 class FrameDecoder
 {
 public:

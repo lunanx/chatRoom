@@ -25,10 +25,17 @@ public:
     ~ClientSession();
     /*
         将发送端字节流发送
+        返回值  -1  发送错误
+            0   对端下线
+            1   暂时发送不出去
+            2   全部发完了
     */
-    int handle_write(const std::string& data);
+    int handle_write(const std::string &data,int flags = 0);
     /*
         从接收端读取字节流，可能会读取A的一部分+B的一部分，所以每次读取不应该清空。
+        返回值  -1  接收错误
+            0   对端下线
+            1   数据读干净了
     */
     int handle_read();
     /*
@@ -46,8 +53,12 @@ public:
     /*
         用于外部获取接收端数据
     */
-    std::string& getRecvBuf();
+    std::string &getRecvBuf();
 
+    /*
+        判断发送端缓冲区是否有数据
+    */
+    bool hasWriteBufPending();
 
 private:
     int m_cfd; // 客户端套接字

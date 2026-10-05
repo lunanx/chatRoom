@@ -13,7 +13,7 @@ ClientSession::~ClientSession()
         close(m_cfd);
 }
 
-int ClientSession::handle_write(const std::string &data)
+int ClientSession::handle_write(const std::string &data,int flags)
 {
 
     // 将新数据写入缓冲，可能还残留上次未发送的数据
@@ -22,16 +22,11 @@ int ClientSession::handle_write(const std::string &data)
     // 尝试把整个发送端缓冲区发送出去
     while (!m_writeBuf.empty())
     {
-        ssize_t res = send(m_cfd, m_writeBuf.data(), m_writeBuf.size(), 0);
+        ssize_t res = send(m_cfd, m_writeBuf.data(), m_writeBuf.size(), flags);
         if (res > 0)
         {
             // 移除发送的部分
             m_writeBuf.erase(0, static_cast<size_t>(res));
-        }
-        else if (res == 0)
-        {
-            printf("对端已下线\n");
-            return 0;
         }
         else
         {
@@ -47,6 +42,11 @@ int ClientSession::handle_write(const std::string &data)
                 // 等待下次epoll
                 return 1;
             }
+            else if (errno == EPIPE)
+            {
+                perror("opposite disconnected");
+                return 0;
+            }
             else
             {
                 perror("send error");
@@ -54,7 +54,7 @@ int ClientSession::handle_write(const std::string &data)
             }
         }
     }
-    return 1;
+    return 2;
 }
 
 int ClientSession::handle_read()
@@ -111,4 +111,14 @@ std::string ClientSession::getWriteBuf()
 std::string& ClientSession::getRecvBuf()
 {
     return m_recvBuf;
+}
+
+bool ClientSession::hasWriteBufPending()
+{
+    if(m_writeBuf.empty())
+    {
+        return false;
+    }
+
+    return true;
 }

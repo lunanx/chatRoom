@@ -14,17 +14,20 @@ DecoderStatus FrameDecoder::parseBufPacket(std::string &bufPacket, struct Decode
         // 检查magic
         if (ntohl(header.magic) != protocolHeader::MAGIC)
         {
+            printf("magic 不对\n");
             return DecoderStatus::ProtocolError;
         }
         // 检查version
         if (ntohs(header.version) != protocolHeader::VERSION)
         {
+            printf("version 不对\n");
             return DecoderStatus::ProtocolError;
         }
         // 检查body_length
         std::uint32_t bodyLength = ntohl(header.body_length);
         if (bodyLength > protocolHeader::MAX_BODY_LENGTH)
         {
+            printf("bodyLength 太长\n");
             return DecoderStatus::ProtocolError;
         }
         // 检查HEADER_SIZE + body_length 是否已经全部收到

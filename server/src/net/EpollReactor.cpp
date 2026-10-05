@@ -428,51 +428,140 @@ void SubReactor::reactor(int reactorId)
             else
             {
                 // 如果不存在就下一个
-                auto cli = m_cliSessionsMap.find(newfd);
-                if (cli == m_cliSessionsMap.end())
+                auto it = m_cliSessionsMap.find(newfd);
+                if (it == m_cliSessionsMap.end())
                 {
                     continue;
                 }
                 // 注意ClientSession里面封装了读写事件
-                int res = cli->second->handle_read(); // 读取客户端的消息
-                std::string &buf = cli->second->getRecvBuf();
-                size_t offset = 0;
-                if (res == 0) // 对端下线了，将fd从epoll中DEL
+                auto cli = it->second;
+                if (m_evs[i].events & EPOLLIN)
                 {
-                    removeEpollFD(newfd);
-                    continue;
-                }
-                else if (res == -1) // 有错误
-                {
-                    printf("handle_read error\n");
-                    removeEpollFD(newfd);
-                    continue;
-                }
-                while (1)
-                {
-                    // 将buf传给Decoder解析
-                    DecodedFrame outputFrame;
-                    DecoderStatus status = m_decoder.parseBufPacket(buf, outputFrame, offset);
-                    if (status == DecoderStatus::ProtocolError)
+                    int res = cli->handle_read(); // 读取客户端的消息
+                    std::string &buf = cli->getRecvBuf();
+                    if (res == 0) // 对端下线了，将fd从epoll中DEL
                     {
-                        // 客户端发的数据有问题，关闭客户端
                         removeEpollFD(newfd);
-                        break;
-                    }
-                    else if (status == DecoderStatus::NeedMoreData)
-                    {
-                        break;
-                    }
-                    else if (status == DecoderStatus::PacketReady)
-                    {
-                        // 处理frame，但具体还未实现，先写主要架构
-                        // 主要实现的时候注意，outputFrame是局部变量
-
-                        // 然后继续解析
                         continue;
                     }
+                    else if (res == -1) // 有错误
+                    {
+                        printf("handle_read error\n");
+                        removeEpollFD(newfd);
+                        continue;
+                    }
+                    // 客户端的消息没问题，开始解析
+                    size_t offset = 0;
+                    while (1)
+                    {
+                        // 将buf传给Decoder解析
+                        DecodedFrame outputFrame;
+                        DecoderStatus status = m_decoder.parseBufPacket(buf, outputFrame, offset);
+                        if (status == DecoderStatus::ProtocolError)
+                        {
+                            // 客户端发的数据有问题，关闭客户端
+                            removeEpollFD(newfd);
+                            break;
+                        }
+                        else if (status == DecoderStatus::NeedMoreData)
+                        {
+                            break;
+                        }
+                        else if (status == DecoderStatus::PacketReady)
+                        {
+                            // 处理frame，但具体还未实现，先写主要架构
+                            // 主要实现的时候注意，outputFrame是局部变量
+
+                            //-------以下也是测试，是为了搭配测试--------
+                            // 直接模拟一份数据
+                            nlohmann::json body =
+                                {
+                                    {"username", "test_user1"},
+                                    {"password", "123456"}};
+
+                            std::string data = m_encoder.buildBufPacket(outputFrame.m_command, outputFrame.m_requestId, body);
+                            res = cli->handle_write(data);
+                            if (res == -1) // 有错误
+                            {
+                                printf("handle_write error\n");
+                                removeEpollFD(newfd);
+                                break;
+                            }
+                            else if (res == 0) // 对端下线了，将fd从epoll中DEL
+                            {
+                                removeEpollFD(newfd);
+                                break;
+                            }
+                            else if (res == 1)
+                            {
+                                if (cli->hasWriteBufPending() == true)
+                                {
+                                    modifyEpollFD(newfd, EPOLLIN | EPOLLOUT);
+                                }
+                                // 这里发送不出去，那我就直接break，epoll重新判断EPOLLOUT
+                                break;
+                            }
+                            else if (res == 2)
+                            {
+                                // 虽然已经默认发送完了，但这里还是判断一下
+                                if (cli->hasWriteBufPending() == false)
+                                {
+                                    modifyEpollFD(newfd, EPOLLIN);
+                                }
+                                // 继续等待下一次解析
+                                continue;
+                            }
+
+                            //-------测试结束
+
+                            // 自己之后要TODO：
+                            //  1待将outputFrame发送给`其他地方`
+                            //  2继续解析 continue;
+                        }
+                    }
+                    // 解析完的数据可以删除了
+                    buf.erase(0, offset);
                 }
-                buf.erase(0,offset);
+                if (m_evs[i].events & EPOLLOUT)
+                {
+                    // ---------------以下为测试！！！！！！----------------------
+
+                    // 本来这里应该是吧outputframe给其他类进一步处理的，但因为还没设置其他类，没办法直接加入EPOLLOUT，就只想到这样测试了
+
+                    // 循环将数据发送给客户端
+                    // 随便准备一个JSON
+                    nlohmann::json body =
+                        {
+                            {"username", "test_user2"},
+                            {"password", "123456"}};
+                    std::string data = m_encoder.buildBufPacket(22, 5, body);
+                    
+                    int res = cli->handle_write(data, MSG_NOSIGNAL);// flag为MSG_NOSIGNAL，避免SIGPIPE
+                    if (res == -1) // 有错误
+                    {
+                        printf("handle_write error\n");
+                        removeEpollFD(newfd);
+                        continue; // 继续下一个epoll
+                    }
+                    else if (res == 0) // 对端下线了，将fd从epoll中DEL
+                    {
+                        removeEpollFD(newfd);
+                        continue; // 继续下一个epoll
+                    }
+                    else if (res == 2)
+                    {
+                        // 虽然已经默认发送完了，但这里还是判断一下
+                        if (cli->hasWriteBufPending() == false)
+                        {
+                            modifyEpollFD(newfd, EPOLLIN);
+                        }
+                        continue; // 继续下一个epoll
+                    }
+
+                    // res == 1的情况不需要在判断了，因为就是有EPOLLOUT才进入的这里。
+                    
+                    //----------- 测试结束
+                }
             }
         }
     }

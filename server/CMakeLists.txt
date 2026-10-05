@@ -48,12 +48,15 @@ add_executable(InternetChatRoomServer
 
     src/protocol/FrameDecoder.cpp
     src/protocol/FrameDecoder.h
+    src/protocol/FrameEncoder.h
+    src/protocol/FrameEncoder.cpp
 )
 
 target_include_directories(InternetChatRoomServer
     PRIVATE
         ${CMAKE_CURRENT_SOURCE_DIR}/src
         ${CMAKE_CURRENT_SOURCE_DIR}/../common
+        ${CMAKE_CURRENT_SOURCE_DIR}/../resources
 )
 
 target_link_libraries(InternetChatRoomServer

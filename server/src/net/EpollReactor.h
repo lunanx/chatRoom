@@ -2,6 +2,7 @@
 
 #include "protocol/FrameDecoder.h"
 #include "ClientSession.h"
+#include "protocol/FrameEncoder.h"
 #include <thread>
 #include <sys/epoll.h>
 #include <unordered_map>
@@ -111,6 +112,8 @@ private:
     epoll_event m_evs[subSessionMAXCnt]; // 每个线程产生的文件描述符集合
 
     FrameDecoder m_decoder; // 解包器
+
+    FrameEncoder m_encoder; // 装包器
 };
 
 /*
