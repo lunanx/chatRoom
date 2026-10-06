@@ -25,12 +25,13 @@ public:
     ~ClientSession();
     /*
         将发送端字节流发送
+        参数flag默认为MSG_NOSIGNAL，避免SIGPIPE
         返回值  -1  发送错误
             0   对端下线
             1   暂时发送不出去
             2   全部发完了
     */
-    int handle_write(const std::string &data,int flags = 0);
+    int handle_write(const std::string &data,int flags = MSG_NOSIGNAL);
     /*
         从接收端读取字节流，可能会读取A的一部分+B的一部分，所以每次读取不应该清空。
         返回值  -1  接收错误

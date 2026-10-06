@@ -31,5 +31,5 @@ public:
                 NeedMoreData 表示数据不够，上层重新recv
                 PacketReady 表示是完整的一份数据,上层处理完整的Frame
     */
-    DecoderStatus parseBufPacket(std::string &bufPacket, struct DecodedFrame &outputFrame, size_t &offset);
+    DecoderStatus parseBufPacket(const std::string &bufPacket, struct DecodedFrame &outputFrame, size_t &offset);
 };

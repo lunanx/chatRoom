@@ -44,7 +44,7 @@ int ClientSession::handle_write(const std::string &data,int flags)
             }
             else if (errno == EPIPE)
             {
-                perror("opposite disconnected");
+                perror("peer closed connection");
                 return 0;
             }
             else
@@ -70,7 +70,7 @@ int ClientSession::handle_read()
         }
         else if (res == 0)
         {
-            printf("对端已下线\n");
+            printf("peer closed connection\n");
             return 0;
         }
         else

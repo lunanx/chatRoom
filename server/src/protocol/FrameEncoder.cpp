@@ -20,7 +20,7 @@ std::string FrameEncoder::buildBufPacket(
     std::string packet;
     packet.reserve(protocolHeader::HEADER_SIZE + bodyStr.size());
     //一定是先加header，再加body
-    packet.append(reinterpret_cast<const char*>(&header));
+    packet.append(reinterpret_cast<const char*>(&header),protocolHeader::HEADER_SIZE);
     packet.append(bodyStr);
 
     return packet;

@@ -178,6 +178,7 @@ void EpollReactor::run()
                 socklen = sizeof(cin);
                 while (1)
                 {
+                    socklen = sizeof(cin);
                     int newfd = accept(m_sfd, (sockaddr *)&cin, &socklen);
                     if (newfd == -1)
                     {
@@ -200,6 +201,7 @@ void EpollReactor::run()
                     if (setNonblocking(newfd) == -1)
                     {
                         printf("setNonblock error\n");
+                        close(newfd);
                         break;
                     }
                     // 有新连接来了,轮询sub
@@ -393,6 +395,7 @@ void SubReactor::reactor(int reactorId)
         for (int i = 0; i < num; i++)
         {
             int newfd = m_evs[i].data.fd;
+            uint32_t events = m_evs[i].events;
             // 说明父进程往m_wakeFD写东西了,也就是队列里有数据了
             if (newfd == m_wakeFD)
             {
@@ -435,7 +438,43 @@ void SubReactor::reactor(int reactorId)
                 }
                 // 注意ClientSession里面封装了读写事件
                 auto cli = it->second;
-                if (m_evs[i].events & EPOLLIN)
+                if (events & EPOLLERR)
+                {
+                    int error = 0;
+                    socklen_t len = sizeof(error);
+                    if (getsockopt(newfd, SOL_SOCKET, SO_ERROR, &error, &len) == -1)
+                    {
+                        perror("getsockopt error");
+                    }
+                    else
+                    {
+                        printf("EPOLLERR: socket error: %s\n", strerror(error));
+                    }
+                    close(newfd);
+                    continue; // 继续下一个epoll
+                }
+
+                if (events & EPOLLHUP)
+                {
+                    printf("EPOLLHUP: connection hang up\n");
+                    close(newfd);
+                    continue; // 继续下一个epoll
+                }
+
+                if (events & EPOLLRDHUP)
+                {
+                    printf("EPOLLRDHUP: peer closed write side\n");
+
+                    int res = cli->handle_read();
+                    if (res == 0)
+                    {
+                        // 对端下线了
+                        close(newfd);
+                        continue; // 继续下一个epoll
+                    }
+                }
+                
+                if (events & EPOLLIN)
                 {
                     int res = cli->handle_read(); // 读取客户端的消息
                     std::string &buf = cli->getRecvBuf();
@@ -452,6 +491,7 @@ void SubReactor::reactor(int reactorId)
                     }
                     // 客户端的消息没问题，开始解析
                     size_t offset = 0;
+                    bool isRemoveFD = false; // 防止删除了对象，仍然继续使用
                     while (1)
                     {
                         // 将buf传给Decoder解析
@@ -461,6 +501,7 @@ void SubReactor::reactor(int reactorId)
                         {
                             // 客户端发的数据有问题，关闭客户端
                             removeEpollFD(newfd);
+                            isRemoveFD = true;
                             break;
                         }
                         else if (status == DecoderStatus::NeedMoreData)
@@ -485,18 +526,20 @@ void SubReactor::reactor(int reactorId)
                             {
                                 printf("handle_write error\n");
                                 removeEpollFD(newfd);
+                                isRemoveFD = true;
                                 break;
                             }
                             else if (res == 0) // 对端下线了，将fd从epoll中DEL
                             {
                                 removeEpollFD(newfd);
+                                isRemoveFD = true;
                                 break;
                             }
                             else if (res == 1)
                             {
                                 if (cli->hasWriteBufPending() == true)
                                 {
-                                    modifyEpollFD(newfd, EPOLLIN | EPOLLOUT);
+                                    modifyEpollFD(newfd, EPOLLIN | EPOLLRDHUP | EPOLLOUT);
                                 }
                                 // 这里发送不出去，那我就直接break，epoll重新判断EPOLLOUT
                                 break;
@@ -506,7 +549,7 @@ void SubReactor::reactor(int reactorId)
                                 // 虽然已经默认发送完了，但这里还是判断一下
                                 if (cli->hasWriteBufPending() == false)
                                 {
-                                    modifyEpollFD(newfd, EPOLLIN);
+                                    modifyEpollFD(newfd, EPOLLIN | EPOLLRDHUP);
                                 }
                                 // 继续等待下一次解析
                                 continue;
@@ -519,24 +562,22 @@ void SubReactor::reactor(int reactorId)
                             //  2继续解析 continue;
                         }
                     }
-                    // 解析完的数据可以删除了
+                    // FD已经被删除了，要跳过当前的epoll event
+                    if (isRemoveFD)
+                    {
+                        continue; // 跳过当前
+                    }
+                    // 正常解析完的数据可以删除了
                     buf.erase(0, offset);
                 }
-                if (m_evs[i].events & EPOLLOUT)
+
+                if (events & EPOLLOUT)
                 {
                     // ---------------以下为测试！！！！！！----------------------
 
                     // 本来这里应该是吧outputframe给其他类进一步处理的，但因为还没设置其他类，没办法直接加入EPOLLOUT，就只想到这样测试了
-
-                    // 循环将数据发送给客户端
-                    // 随便准备一个JSON
-                    nlohmann::json body =
-                        {
-                            {"username", "test_user2"},
-                            {"password", "123456"}};
-                    std::string data = m_encoder.buildBufPacket(22, 5, body);
-                    
-                    int res = cli->handle_write(data, MSG_NOSIGNAL);// flag为MSG_NOSIGNAL，避免SIGPIPE
+                    // 发送空数据继续处理未发送的数据
+                    int res = cli->handle_write("");
                     if (res == -1) // 有错误
                     {
                         printf("handle_write error\n");
@@ -559,7 +600,7 @@ void SubReactor::reactor(int reactorId)
                     }
 
                     // res == 1的情况不需要在判断了，因为就是有EPOLLOUT才进入的这里。
-                    
+
                     //----------- 测试结束
                 }
             }

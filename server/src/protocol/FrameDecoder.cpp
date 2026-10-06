@@ -4,13 +4,15 @@
 #include <cstdint>
 #include <endian.h>
 
-DecoderStatus FrameDecoder::parseBufPacket(std::string &bufPacket, struct DecodedFrame &outputFrame, size_t &offset)
+DecoderStatus FrameDecoder::parseBufPacket(const std::string &bufPacket, struct DecodedFrame &outputFrame, size_t &offset)
 {
-    if (bufPacket.size() >= protocolHeader::HEADER_SIZE)
+    // 注意data和size要offset偏移，bufPacket在erase前都还是原本的
+    size_t available = bufPacket.size() - offset;
+    if (available >= protocolHeader::HEADER_SIZE)
     {
         // 读取Header
         protocolHeader::Header header;
-        memcpy(&header, bufPacket.data(), protocolHeader::HEADER_SIZE);
+        memcpy(&header, bufPacket.data() + offset, protocolHeader::HEADER_SIZE);
         // 检查magic
         if (ntohl(header.magic) != protocolHeader::MAGIC)
         {
@@ -31,14 +33,14 @@ DecoderStatus FrameDecoder::parseBufPacket(std::string &bufPacket, struct Decode
             return DecoderStatus::ProtocolError;
         }
         // 检查HEADER_SIZE + body_length 是否已经全部收到
-        if (bufPacket.size() < bodyLength + protocolHeader::HEADER_SIZE)
+        if (available < bodyLength + protocolHeader::HEADER_SIZE)
         {
             return DecoderStatus::NeedMoreData;
         }
         // 得到一个完整的Frame,其实只需要有 command、request_id 和 body
         outputFrame.m_command = static_cast<std::uint16_t>(ntohs(header.command));
         outputFrame.m_requestId = be64toh(header.request_id);
-        outputFrame.m_body = bufPacket.substr(protocolHeader::HEADER_SIZE, bodyLength);
+        outputFrame.m_body = bufPacket.substr(offset + protocolHeader::HEADER_SIZE, bodyLength);
         // 修改offset
         offset += protocolHeader::HEADER_SIZE + bodyLength;
 
