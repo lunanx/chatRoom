@@ -210,13 +210,12 @@ void EpollReactor::run()
                     // 有新连接来了,轮询sub
                     auto sub = m_subReactors[m_subTimer++ % subMAXCnt];
                     // 儿子都在 wait阻塞呢，先将客户端信息放到他的连接队列中
-                    sub->addQueueConnFD(ConInfo{newfd, cin});
-                    uint64_t cnt = 1;
-                    // 唤醒儿子
-                    if (write(sub->getWakeFD(), &cnt, sizeof(cnt)) == -1)
+                    // 唤醒 + 入队
+                    bool res = sub->addQueueConnFD(ConInfo{newfd, cin});
+                    if(!res)
                     {
-                        perror("Sub wake error");
-                        break;
+                        close(newfd);
+                        continue;
                     }
                 }
             }
@@ -301,11 +300,34 @@ bool SubReactor::initSub()
     return true;
 }
 
-void SubReactor::addQueueConnFD(const ConInfo &info)
+bool SubReactor::addQueueConnFD(const ConInfo &info)
 {
-    mux.lock(); // 获取锁资源
+    mux.lock();//获取锁资源
+    uint64_t cnt = 1;
+    ssize_t res;
+    do
+    {
+        res = write(m_wakeFD, &cnt, sizeof(cnt));
+    } while (res == -1 && errno == EINTR);
+
+    if (res == -1)
+    {
+
+        perror("m_wakeFD write error");
+        return false;
+    }
+
+    if (res != sizeof(cnt))
+    {
+        printf("m_wakeFD write size error\n");
+        return false;
+    }
+
     m_queueConnFD.push(info);
+
     mux.unlock(); // 释放锁资源
+
+    return true;
 }
 
 int SubReactor::getWakeFD()
@@ -407,10 +429,40 @@ void SubReactor::reactor(int reactorId)
             if (newfd == m_wakeFD)
             {
                 // 读取计数器
-                uint64_t cnt;
-                read(newfd, &cnt, sizeof(cnt)); // 消耗事件
+                uint64_t cnt = 0;
+                ssize_t res;
+                do
+                {
+                    res = read(newfd, &cnt, sizeof(cnt)); // 尝试消耗事件
+                } while (res == -1 && errno == EINTR);
+
+                // 还是有错误
+                if (res == -1)
+                {
+                    if (errno == EAGAIN || errno == EWOULDBLOCK)
+                    {
+                        // 当前没有待处理的eventfd计数
+                        continue;
+                    }
+
+                    // eventfd本身出现了异常
+                    perror("m_wakeFD read error");
+                    return;
+                }
+                // res大小并不是要的计数
+                if (res != sizeof(cnt))
+                {
+                    printf("m_wakeFD read size error\n");
+                    return;
+                }
+
                 while (cnt-- != 0)
                 {
+                    if (m_queueConnFD.empty())
+                    {
+                        printf("wakeFD has count ,but connection queue may mismatch\n");
+                        break;
+                    }
                     mux.lock(); // 获取锁资源
                     ConInfo newConInfo = m_queueConnFD.front();
                     m_queueConnFD.pop();
@@ -431,9 +483,34 @@ void SubReactor::reactor(int reactorId)
             else if (newfd == m_stopSignalFD)
             {
                 // 读取计数器
-                uint64_t cnt;
-                read(m_stopSignalFD, &cnt, sizeof(cnt)); // 消耗事件
-                return;                                  // 直接return
+                uint64_t cnt = 0;
+                ssize_t res;
+                do
+                {
+                    res = read(newfd, &cnt, sizeof(cnt)); // 尝试消耗事件
+                } while (res == -1 && errno == EINTR);
+
+                // 还是有错误
+                if (res == -1)
+                {
+                    if (errno == EAGAIN || errno == EWOULDBLOCK)
+                    {
+                        // 当前没有待处理的eventfd计数
+                        continue;
+                    }
+
+                    // eventfd本身出现了异常
+                    perror("m_stopSignalFD read error");
+                    return;
+                }
+                // res大小并不是要的计数
+                if (res != sizeof(cnt))
+                {
+                    printf("m_stopSignalFD read size error\n");
+                    return;
+                }
+
+                return; // 直接return
             }
             else
             {

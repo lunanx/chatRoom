@@ -43,9 +43,9 @@ public:
     ~SubReactor();
     /*
         给主线程一个API
-        让主线程将新客户端添加至连接队列
+        唤醒 + 让主线程将新客户端添加至连接队列
     */
-    void addQueueConnFD(const ConInfo &info); // 给老爹一个API，帮你直接加
+    bool addQueueConnFD(const ConInfo &info);
     /*
         给主线程一个获取唤醒文件描述符的API 在唤醒前，起码这个m_wakeFD初始化好了，也就是已经存在文件。
     */
