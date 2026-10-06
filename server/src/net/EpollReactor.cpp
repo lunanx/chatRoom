@@ -26,11 +26,14 @@ EpollReactor::~EpollReactor()
         if (m_subReactors[i] != nullptr)
         {
             // 可能已经创建了线程，那就是需要join()
-            if (m_threads[i].joinable())
+            if (i < m_threads.size()) // 确保进一步线程是存在的，否则可能会有未定义行为
             {
-                uint64_t cnt = 1;
-                write(m_subReactors[i]->getStopFD(), &cnt, sizeof(cnt));
-                m_threads[i].join();
+                if (m_threads[i].joinable())
+                {
+                    uint64_t cnt = 1;
+                    write(m_subReactors[i]->getStopFD(), &cnt, sizeof(cnt));
+                    m_threads[i].join();
+                }
             }
             // 但不管需不需要join(),都是要delete对象
             delete m_subReactors[i];    // 释放单个对象
@@ -388,6 +391,10 @@ void SubReactor::reactor(int reactorId)
         int num = epoll_wait(m_epfd, m_evs, sizeof(m_evs) / sizeof(m_evs[0]), -1);
         if (num == -1)
         {
+            if (errno == EINTR)
+            {
+                continue;
+            }
             perror("m_epfd wait error");
             return;
         }
@@ -450,31 +457,18 @@ void SubReactor::reactor(int reactorId)
                     {
                         printf("EPOLLERR: socket error: %s\n", strerror(error));
                     }
-                    close(newfd);
+                    removeEpollFD(newfd);
                     continue; // 继续下一个epoll
                 }
 
                 if (events & EPOLLHUP)
                 {
                     printf("EPOLLHUP: connection hang up\n");
-                    close(newfd);
+                    removeEpollFD(newfd);
                     continue; // 继续下一个epoll
                 }
 
-                if (events & EPOLLRDHUP)
-                {
-                    printf("EPOLLRDHUP: peer closed write side\n");
-
-                    int res = cli->handle_read();
-                    if (res == 0)
-                    {
-                        // 对端下线了
-                        close(newfd);
-                        continue; // 继续下一个epoll
-                    }
-                }
-                
-                if (events & EPOLLIN)
+                if (events & (EPOLLIN | EPOLLRDHUP))
                 {
                     int res = cli->handle_read(); // 读取客户端的消息
                     std::string &buf = cli->getRecvBuf();
@@ -594,7 +588,7 @@ void SubReactor::reactor(int reactorId)
                         // 虽然已经默认发送完了，但这里还是判断一下
                         if (cli->hasWriteBufPending() == false)
                         {
-                            modifyEpollFD(newfd, EPOLLIN);
+                            modifyEpollFD(newfd, EPOLLIN | EPOLLRDHUP);
                         }
                         continue; // 继续下一个epoll
                     }
