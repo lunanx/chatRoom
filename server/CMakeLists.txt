@@ -70,3 +70,33 @@ target_compile_options(InternetChatRoomServer
         -Wextra
         -Wpedantic
 )
+
+
+# Protocol tests: 独立测试目标，不加入生产服务器可执行文件
+option(BUILD_PROTOCOL_TESTS "Build protocol unit tests" ON)
+
+if(BUILD_PROTOCOL_TESTS)
+    enable_testing()
+
+    add_executable(ProtocolUnitTest
+        tests/protocol_test.cpp
+        src/protocol/FrameDecoder.cpp
+        src/protocol/FrameEncoder.cpp
+    )
+
+    target_include_directories(ProtocolUnitTest
+        PRIVATE
+            ${CMAKE_CURRENT_SOURCE_DIR}/src
+            ${CMAKE_CURRENT_SOURCE_DIR}/../common
+            ${CMAKE_CURRENT_SOURCE_DIR}/../resources
+    )
+
+    target_compile_options(ProtocolUnitTest
+        PRIVATE
+            -Wall
+            -Wextra
+            -Wpedantic
+    )
+
+    add_test(NAME ProtocolUnitTest COMMAND ProtocolUnitTest)
+endif()

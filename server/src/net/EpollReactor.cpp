@@ -26,7 +26,7 @@ EpollReactor::~EpollReactor()
         if (m_subReactors[i] != nullptr)
         {
             // 可能已经创建了线程，那就是需要join()
-            if (i < m_threads.size()) // 确保进一步线程是存在的，否则可能会有未定义行为
+            if ((size_t)i < m_threads.size()) // 确保进一步线程是存在的，否则可能会有未定义行为
             {
                 if (m_threads[i].joinable())
                 {
@@ -212,7 +212,7 @@ void EpollReactor::run()
                     // 儿子都在 wait阻塞呢，先将客户端信息放到他的连接队列中
                     // 唤醒 + 入队
                     bool res = sub->addQueueConnFD(ConInfo{newfd, cin});
-                    if(!res)
+                    if (!res)
                     {
                         close(newfd);
                         continue;
@@ -302,7 +302,7 @@ bool SubReactor::initSub()
 
 bool SubReactor::addQueueConnFD(const ConInfo &info)
 {
-    mux.lock();//获取锁资源
+    mux.lock(); // 获取锁资源
     uint64_t cnt = 1;
     ssize_t res;
     do
@@ -314,12 +314,14 @@ bool SubReactor::addQueueConnFD(const ConInfo &info)
     {
 
         perror("m_wakeFD write error");
+        mux.unlock(); // 这里一定要释放锁资源，不然就会死锁了
         return false;
     }
 
     if (res != sizeof(cnt))
     {
         printf("m_wakeFD write size error\n");
+        mux.unlock(); // 这里一定要释放锁资源，不然就会死锁了
         return false;
     }
 
@@ -458,12 +460,12 @@ void SubReactor::reactor(int reactorId)
 
                 while (cnt-- != 0)
                 {
+                    mux.lock(); // 获取锁资源
                     if (m_queueConnFD.empty())
                     {
                         printf("wakeFD has count ,but connection queue may mismatch\n");
                         break;
                     }
-                    mux.lock(); // 获取锁资源
                     ConInfo newConInfo = m_queueConnFD.front();
                     m_queueConnFD.pop();
                     mux.unlock(); // 释放锁资源
