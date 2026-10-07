@@ -3,6 +3,7 @@
 #include "protocol/FrameDecoder.h"
 #include "ClientSession.h"
 #include "protocol/FrameEncoder.h"
+#include "dispatcher/Dispatcher.h"
 #include <thread>
 #include <sys/epoll.h>
 #include <unordered_map>
@@ -114,6 +115,8 @@ private:
     FrameDecoder m_decoder; // 解包器
 
     FrameEncoder m_encoder; // 装包器
+
+    Dispatcher m_dispatcher; //调度器
 };
 
 /*

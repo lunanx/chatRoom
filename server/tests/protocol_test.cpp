@@ -55,7 +55,7 @@ namespace
         return packet;
     }
 
-    void checkFrame(const DecodedFrame &frame,
+    void checkFrame(const protocolHeader::PacketFrame &frame,
                     std::uint16_t command,
                     std::uint64_t requestId,
                     const std::string &body)
@@ -82,7 +82,7 @@ namespace
         CHECK(packet.size() == protocolHeader::HEADER_SIZE + expectedBody.size());
 
         size_t offset = 0;
-        DecodedFrame output{};
+        protocolHeader::PacketFrame output{};
         const DecoderStatus status = decoder.parseBufPacket(packet, output, offset);
 
         CHECK(status == DecoderStatus::PacketReady);
@@ -102,7 +102,7 @@ namespace
 
         const std::string partial = packet.substr(0, 10);
         size_t offset = 0;
-        DecodedFrame output{};
+        protocolHeader::PacketFrame output{};
 
         const DecoderStatus status = decoder.parseBufPacket(partial, output, offset);
 
@@ -122,7 +122,7 @@ namespace
 
         const std::string partial = packet.substr(0, packet.size() - 1);
         size_t offset = 0;
-        DecodedFrame output{};
+        protocolHeader::PacketFrame output{};
 
         const DecoderStatus status = decoder.parseBufPacket(partial, output, offset);
 
@@ -149,7 +149,7 @@ namespace
 
         const std::string buffer = packetA + packetB;
         size_t offset = 0;
-        DecodedFrame output{};
+        protocolHeader::PacketFrame output{};
 
         DecoderStatus status = decoder.parseBufPacket(buffer, output, offset);
         CHECK(status == DecoderStatus::PacketReady);
@@ -196,7 +196,7 @@ namespace
 
         while (true)
         {
-            DecodedFrame output{};
+            protocolHeader::PacketFrame output{};
             const DecoderStatus status = decoder.parseBufPacket(buffer, output, offset);
 
             if (status == DecoderStatus::PacketReady)
@@ -225,7 +225,7 @@ namespace
 
         std::string buffer;
         size_t offset = 0;
-        DecodedFrame output{};
+        protocolHeader::PacketFrame output{};
 
         const std::vector<std::pair<size_t, size_t>> chunks = {
             {0, 5},
@@ -265,7 +265,7 @@ namespace
         packet[3] = static_cast<char>(0x66);
 
         size_t offset = 0;
-        DecodedFrame output{};
+        protocolHeader::PacketFrame output{};
         const DecoderStatus status = decoder.parseBufPacket(packet, output, offset);
 
         CHECK(status == DecoderStatus::ProtocolError);
@@ -286,7 +286,7 @@ namespace
         packet[5] = 2;
 
         size_t offset = 0;
-        DecodedFrame output{};
+        protocolHeader::PacketFrame output{};
         const DecoderStatus status = decoder.parseBufPacket(packet, output, offset);
 
         CHECK(status == DecoderStatus::ProtocolError);
@@ -308,7 +308,7 @@ namespace
         packet.append(reinterpret_cast<const char *>(&header), protocolHeader::HEADER_SIZE);
 
         size_t offset = 0;
-        DecodedFrame output{};
+        protocolHeader::PacketFrame output{};
         const DecoderStatus status = decoder.parseBufPacket(packet, output, offset);
 
         CHECK(status == DecoderStatus::ProtocolError);
@@ -325,7 +325,7 @@ namespace
             "");
 
         size_t offset = 0;
-        DecodedFrame output{};
+        protocolHeader::PacketFrame output{};
         const DecoderStatus status = decoder.parseBufPacket(packet, output, offset);
 
         CHECK(status == DecoderStatus::PacketReady);
@@ -346,7 +346,7 @@ namespace
             "{}" );
 
         size_t offset = 0;
-        DecodedFrame output{};
+        protocolHeader::PacketFrame output{};
         const DecoderStatus status = decoder.parseBufPacket(packet, output, offset);
 
         CHECK(status == DecoderStatus::PacketReady);
@@ -371,7 +371,7 @@ namespace
 
         const std::string buffer = packetA + packetB.substr(0, 7);
         size_t offset = 0;
-        DecodedFrame output{};
+        protocolHeader::PacketFrame output{};
 
         DecoderStatus status = decoder.parseBufPacket(buffer, output, offset);
         CHECK(status == DecoderStatus::PacketReady);

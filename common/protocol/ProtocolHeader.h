@@ -24,9 +24,9 @@
 
     整数用网络字节序---通过主机转网络
     --------------------------------------------
-    对于request_id: 
+    对于request_id:
         客户端主动请求：
-            request_id = 客户端生成的唯一请求编号 
+            request_id = 客户端生成的唯一请求编号
 
             服务器回复：
             request_id = 原请求的 request_id
@@ -125,4 +125,22 @@ namespace protocolHeader
         Header长度
     */
     constexpr std::size_t HEADER_SIZE = sizeof(Header);
+
+    /*
+        数据包结构体
+    */
+    struct PacketFrame
+    {
+        PacketFrame() = default;
+        PacketFrame(std::uint16_t command,
+            std::string body,
+            std::uint64_t requestId)
+            :m_command(command),
+             m_body(body),
+             m_requestId(requestId)
+        {};
+        std::uint16_t m_command{0};
+        std::string m_body;
+        std::uint64_t m_requestId{0};
+    };
 }

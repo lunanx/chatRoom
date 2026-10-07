@@ -4,7 +4,7 @@
 #include <cstdint>
 #include <endian.h>
 
-DecoderStatus FrameDecoder::parseBufPacket(const std::string &bufPacket, struct DecodedFrame &outputFrame, size_t &offset)
+DecoderStatus FrameDecoder::parseBufPacket(const std::string &bufPacket, protocolHeader::PacketFrame &outputFrame, size_t &offset)
 {
     // 注意data和size要offset偏移，bufPacket在erase前都还是原本的
     size_t available = bufPacket.size() - offset;

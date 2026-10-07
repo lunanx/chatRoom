@@ -10,13 +10,6 @@ enum class DecoderStatus
     PacketReady    // 是一个完整的数据包
 };
 
-// 相当于解析出来的数据包，这里不能用作FrameDecoder的变量，不然会存在，A还没解析，B的数据被解析出来覆盖了A
-struct DecodedFrame
-{
-    std::uint16_t m_command;
-    std::string m_body;
-    std::uint64_t m_requestId;
-};
 
 /*
     将客户端数据包解析
@@ -31,5 +24,5 @@ public:
                 NeedMoreData 表示数据不够，上层重新recv
                 PacketReady 表示是完整的一份数据,上层处理完整的Frame
     */
-    DecoderStatus parseBufPacket(const std::string &bufPacket, struct DecodedFrame &outputFrame, size_t &offset);
+    DecoderStatus parseBufPacket(const std::string &bufPacket, protocolHeader::PacketFrame &outputFrame, size_t &offset);
 };

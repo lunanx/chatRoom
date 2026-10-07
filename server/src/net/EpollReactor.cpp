@@ -568,7 +568,7 @@ void SubReactor::reactor(int reactorId)
                     while (1)
                     {
                         // 将buf传给Decoder解析
-                        DecodedFrame outputFrame;
+                        protocolHeader::PacketFrame outputFrame;
                         DecoderStatus status = m_decoder.parseBufPacket(buf, outputFrame, offset);
                         if (status == DecoderStatus::ProtocolError)
                         {
@@ -588,31 +588,8 @@ void SubReactor::reactor(int reactorId)
 
                             //-------以下也是测试，是为了搭配测试--------
 
-                            // 当前阶段先做最小的命令分发;
-                            // LOGIN_REQUEST -> LOGIN_FAILED
-                            // 其他命令      -> UNKNOWN
-                            std::uint16_t responseCommand = static_cast<std::uint16_t>(protocolHeader::CommandType::UNKNOWN);
-                            nlohmann::json responseBody;
-
-                            switch (static_cast<protocolHeader::CommandType>(outputFrame.m_command))
-                            {
-                            case protocolHeader::CommandType::LOGIN_REQUEST:
-                            {
-                                responseCommand = static_cast<std::uint16_t>(protocolHeader::CommandType::LOGIN_FAILED);
-                                responseBody =
-                                    {
-                                        {"code", 9999},
-                                        {"message", "temporary test response: login failed"}};
-                                break;
-                            }
-                            default:
-                                responseBody =
-                                    {
-                                        {"code", 4001},
-                                        {"message", "unsupported command"}};
-                                break;
-                            }
-                            std::string data = m_encoder.buildBufPacket(responseCommand, outputFrame.m_requestId, responseBody);
+                            auto responseFrame = m_dispatcher.dispatch(outputFrame);
+                            std::string data = m_encoder.buildBufPacket(responseFrame.m_command, responseFrame.m_requestId, nlohmann::json::parse(responseFrame.m_body));
                             res = cli->handle_write(data);
                             if (res == -1) // 有错误
                             {
