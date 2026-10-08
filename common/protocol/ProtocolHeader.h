@@ -128,6 +128,10 @@ namespace protocolHeader
 
     /*
         数据包结构体
+        有三个参数:
+        std::uint16_t m_command
+        std::string m_body
+        std::uint64_t m_requestId
     */
     struct PacketFrame
     {

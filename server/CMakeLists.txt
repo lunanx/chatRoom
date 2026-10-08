@@ -53,6 +53,8 @@ add_executable(InternetChatRoomServer
 
     src/dispatcher/Dispatcher.h
     src/dispatcher/Dispatcher.cpp
+    src/security/PasswordHasher.h
+    src/security/PasswordHasher.cpp
 )
 
 target_include_directories(InternetChatRoomServer
@@ -65,6 +67,7 @@ target_include_directories(InternetChatRoomServer
 target_link_libraries(InternetChatRoomServer
     PRIVATE
         Threads::Threads
+        sodium
 )
 # 开启编译警告  方便进一步学习C++
 target_compile_options(InternetChatRoomServer 
