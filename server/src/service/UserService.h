@@ -29,7 +29,7 @@ private:
         avatar 如果存在，类型是否正确
 
     */
-    static bool validateRegisterRequest(const std::string &body);
+    static bool validateRegisterRequest(const std::string &body,nlohmann::json& data);
 
     /*
         检查用户名是否符合要求

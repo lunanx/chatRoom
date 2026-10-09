@@ -1,6 +1,6 @@
 #include "UserRepository.h"
 
-bool UserRepository::findByUsername(std::string username)
+bool UserRepository::findByUsername(const std::string& username)
 {
     
 }

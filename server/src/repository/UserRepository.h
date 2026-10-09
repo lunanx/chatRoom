@@ -5,5 +5,5 @@
 class UserRepository
 {
 public:
-    static bool findByUsername(std::string username);
+    static bool findByUsername(const std::string& username);
 };
