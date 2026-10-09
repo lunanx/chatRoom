@@ -15,10 +15,8 @@ protocolHeader::CommandType UserService::registerUser(const std::string &body, s
         7 返回注册结果
     */
 
-    // 数据类型通过了,进行下一层检验
-
     nlohmann::json data;
-    // 由于没确定好common的body定义，这里先用printf代替，之后需要给responseBody设置参数
+    //校验JSON、username、password、nickname、avatar数据格式是否合格
     if (!validateRegisterRequest(body, data))
     {
         printf("数据类型校验不通过,注册失败\n");

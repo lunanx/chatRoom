@@ -24,6 +24,8 @@ add_executable(InternetChatRoomServer
 
     src/db/DatabaseManager.cpp
     src/db/DatabaseManager.h
+    src/db/DatabaseConfig.cpp
+    src/db/DatabaseConfig.h
 
     src/model/User.cpp
     src/model/User.h
@@ -68,6 +70,7 @@ target_link_libraries(InternetChatRoomServer
     PRIVATE
         Threads::Threads
         sodium
+        mariadbcpp
 )
 # 开启编译警告  方便进一步学习C++
 target_compile_options(InternetChatRoomServer 
@@ -85,9 +88,12 @@ if(BUILD_PROTOCOL_TESTS)
     enable_testing()
 
     add_executable(ProtocolUnitTest
-        tests/protocol_test.cpp
-        src/protocol/FrameDecoder.cpp
-        src/protocol/FrameEncoder.cpp
+        tests/test_database_manager.cpp
+        src/db/DatabaseManager.cpp
+        src/db/DatabaseConfig.cpp
+        src/db/DatabaseManager.h
+        src/db/DatabaseConfig.h
+
     )
 
     target_include_directories(ProtocolUnitTest
@@ -95,6 +101,13 @@ if(BUILD_PROTOCOL_TESTS)
             ${CMAKE_CURRENT_SOURCE_DIR}/src
             ${CMAKE_CURRENT_SOURCE_DIR}/../common
             ${CMAKE_CURRENT_SOURCE_DIR}/../resources
+    )
+
+    target_link_libraries(ProtocolUnitTest
+    PRIVATE
+        Threads::Threads
+        sodium
+        mariadbcpp
     )
 
     target_compile_options(ProtocolUnitTest
