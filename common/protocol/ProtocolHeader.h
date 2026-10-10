@@ -3,6 +3,7 @@
 #include <nlohmann/json.hpp>
 #include <cstdint>
 #include <cstddef>
+#include <string>
 
 /*
    =============================

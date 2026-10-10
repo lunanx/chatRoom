@@ -88,12 +88,9 @@ if(BUILD_PROTOCOL_TESTS)
     enable_testing()
 
     add_executable(ProtocolUnitTest
-        tests/test_database_manager.cpp
-        src/db/DatabaseManager.cpp
-        src/db/DatabaseConfig.cpp
-        src/db/DatabaseManager.h
-        src/db/DatabaseConfig.h
-
+        tests/protocol_test.cpp
+        src/protocol/FrameDecoder.cpp
+        src/protocol/FrameEncoder.cpp
     )
 
     target_include_directories(ProtocolUnitTest
@@ -101,13 +98,6 @@ if(BUILD_PROTOCOL_TESTS)
             ${CMAKE_CURRENT_SOURCE_DIR}/src
             ${CMAKE_CURRENT_SOURCE_DIR}/../common
             ${CMAKE_CURRENT_SOURCE_DIR}/../resources
-    )
-
-    target_link_libraries(ProtocolUnitTest
-    PRIVATE
-        Threads::Threads
-        sodium
-        mariadbcpp
     )
 
     target_compile_options(ProtocolUnitTest
@@ -118,4 +108,41 @@ if(BUILD_PROTOCOL_TESTS)
     )
 
     add_test(NAME ProtocolUnitTest COMMAND ProtocolUnitTest)
+endif()
+
+
+# Database tests: 独立测试目标，不加入生产服务器可执行文件
+option(BUILD_PROTOCOL_TESTS "Build protocol unit tests" ON)
+
+if(BUILD_PROTOCOL_TESTS)
+    enable_testing()
+
+    add_executable(DatabaseManagerTest
+        tests/test_database_manager.cpp
+        src/db/DatabaseManager.cpp
+        src/db/DatabaseConfig.cpp
+    )
+
+    target_include_directories(DatabaseManagerTest
+        PRIVATE
+            ${CMAKE_CURRENT_SOURCE_DIR}/src
+            ${CMAKE_CURRENT_SOURCE_DIR}/../common
+            ${CMAKE_CURRENT_SOURCE_DIR}/../resources
+    )
+
+    target_link_libraries(DatabaseManagerTest
+    PRIVATE
+        Threads::Threads
+        sodium
+        mariadbcpp
+    )
+
+    target_compile_options(DatabaseManagerTest
+        PRIVATE
+            -Wall
+            -Wextra
+            -Wpedantic
+    )
+
+    add_test(NAME DatabaseManagerTest COMMAND DatabaseManagerTest)
 endif()

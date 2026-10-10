@@ -13,6 +13,12 @@ public:
         const std::string &passwordHash,
         const std::string &nickname,
         const std::string &avatar);
+
+    const std::string& getUsername();
+    const std::string& getPasswordHash();
+    const std::string& getNickname();
+    const std::string& getAvatar();
+
         
 private:
     std::string m_username;

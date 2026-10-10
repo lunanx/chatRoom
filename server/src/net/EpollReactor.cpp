@@ -460,15 +460,17 @@ void SubReactor::reactor(int reactorId)
 
                 while (cnt-- != 0)
                 {
-                    mux.lock(); // 获取锁资源
+                    std::unique_lock<std::mutex> lock(mux); // 获取锁资源
+                    
                     if (m_queueConnFD.empty())
                     {
-                        printf("wakeFD has count ,but connection queue may mismatch\n");
-                        break;
+                        printf("wakeFD has count ,but connection queue may mismatch\n");\
+                        break;// 离开作用域自动释放
                     }
                     ConInfo newConInfo = m_queueConnFD.front();
                     m_queueConnFD.pop();
-                    mux.unlock(); // 释放锁资源
+
+                    lock.unlock(); // 释放锁资源 这里一定要手动释放
                     if (addToEpoll(newConInfo.m_fd))
                     {
                         // 创建session哈希表
