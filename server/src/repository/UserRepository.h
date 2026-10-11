@@ -20,7 +20,7 @@ public:
     /*
         获取已存在username的hash密码
     */
-    static std::unique_ptr<sql::ResultSet> getPasswordHashByUsername(const std::string& username);
+    static std::string getPasswordHashByUsername(const std::string& username);
     
     /*
         通过username修改用户online状态

@@ -15,7 +15,7 @@ public:
     ~DatabaseManager();
 
     // 连接管理
-    bool Connection();
+    bool connect();
     void disconnect();
     bool isConnected() const;
 
@@ -59,3 +59,88 @@ private:
     std::unique_ptr<sql::Connection> m_conn;
 };
 
+template <typename... Args>
+inline int DatabaseManager::executeUpdate(const std::string &sql, const Args &...args)
+{
+    if (!isConnected())
+    {
+        std::cout << "数据库连接已断开\n";
+        return -1;
+    }
+    
+    try
+    {
+        std::unique_ptr<sql::PreparedStatement> pstmt(m_conn->prepareStatement(sql));
+
+        bindParameters(pstmt, args...); // 参数绑定
+
+        return pstmt->executeUpdate();
+    }
+    catch (sql::SQLException &e)
+    {
+        std::cerr << "SQL 执行失败: " << e.what() << std::endl;
+        return -1;
+    }
+}
+
+template <typename... Args>
+inline std::unique_ptr<sql::ResultSet> DatabaseManager::query(const std::string &sql, const Args &...args)
+{
+    if (!isConnected)
+        return nullptr;
+
+    try
+    {
+        std::unique_ptr<sql::PreparedStatement> pstmt(m_conn->prepareStatement(sql));
+
+        bindParameters(pstmt, args...); // 绑定参数
+
+        return std::unique_ptr<sql::ResultSet>(pstmt->executeQuery());
+    }
+    catch (sql::SQLException &e)
+    {
+        std::cerr << "SQL 执行失败: " << e.what() << std::endl;
+        return nullptr;
+    }
+}
+
+template <typename... Args>
+inline bool DatabaseManager::exisit(const std::string &sql, const Args &...args)
+{
+    if (!isConnected)
+    {
+        std::cout << "数据库断开\n";
+        return false;
+    }
+    try
+    {
+        std::unique_ptr<sql::PreparedStatement> pstmt(m_conn->prepareStatement(sql));
+
+        bindParameters(pstmt, args...);
+
+        std::unique_ptr<sql::ResultSet> rs(pstmt->executeQuery());
+
+        if (rs->next())
+        {
+
+            return true;
+        }
+        else
+        {
+            std::cout << "不存在\n";
+            return false;
+        }
+    }
+    catch (sql::SQLException &e)
+    {
+        std::cerr << "SQL 执行失败: " << e.what() << std::endl;
+        return false;
+    }
+}
+
+template <typename... Args>
+inline void DatabaseManager::bindParameters(sql::PreparedStatement &pstmt, const Args &...args)
+{
+    int index = 1;
+    (bindOne(pstmt, index++, args), ...);
+}

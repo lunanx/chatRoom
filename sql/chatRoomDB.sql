@@ -121,10 +121,10 @@ CREATE TABLE IF NOT EXISTS `Friendship`
         ON DELETE RESTRICT
         ON UPDATE CASCADE,
 
-    INDEX `idx_Friendship_user_status` --为了直接查询user_id用户的好友
+    INDEX `idx_Friendship_user_status` -- 为了直接查询user_id用户的好友
         (`user_id`, `status`),
 
-    INDEX `idx_Friendship_friend_status`--为了直接查询friend_id用户的好友
+    INDEX `idx_Friendship_friend_status`-- 为了直接查询friend_id用户的好友
         (`friend_id`, `status`),
 
     CONSTRAINT `ck_Friendship_user_order`
@@ -175,7 +175,7 @@ CREATE TABLE IF NOT EXISTS `FriendRemark`
         ON DELETE RESTRICT
         ON UPDATE CASCADE,
 
-    INDEX `idx_FriendRemark_friend_id` --方便直接查询好友的备注
+    INDEX `idx_FriendRemark_friend_id` -- 方便直接查询好友的备注
         (`friend_id`),
 
     CONSTRAINT `ck_FriendRemark_not_self`
@@ -225,11 +225,11 @@ CREATE TABLE IF NOT EXISTS `FriendRequest`
         REFERENCES `User` (`id`)
         ON DELETE RESTRICT
         ON UPDATE CASCADE,
-
-    INDEX `idx_FriendRequest_receiver_status`       --用于搭配系统通知接收者，注意通知时，FriendRequest.status与Notification.type的对应
+ 
+    INDEX `idx_FriendRequest_receiver_status`       -- 用于搭配系统通知接收者，注意通知时，FriendRequest.status与Notification.type的对应
          (`receiver_id`, `status`, `created_at`),
 
-    INDEX `idx_FriendRequest_sender_status`         --用于搭配系统通知发送者，注意通知时，FriendRequest.status与Notification.type的对应
+    INDEX `idx_FriendRequest_sender_status`         -- 用于搭配系统通知发送者，注意通知时，FriendRequest.status与Notification.type的对应
          (`sender_id`, `status`, `created_at`),
 
     CONSTRAINT `ck_FriendRequest_not_self`
@@ -292,7 +292,7 @@ CREATE TABLE IF NOT EXISTS `Blacklist`
          (`blocked_user_id`),
 
     CONSTRAINT `ck_Blacklist_not_self`
-        CHECK (`user_id` <> `blocked_user_id`)
+        CHECK (`user_id` <> `blocked_user_id`),
 
     CONSTRAINT `ck_Blacklist_status_deleted`
     CHECK
@@ -609,7 +609,7 @@ CREATE TABLE IF NOT EXISTS `Message`
             OR (`recalled_at` IS NOT NULL)  -- 如果 status=2,那么只有recalled_at不是空才能保留
         ),                                  -- 看不懂就换成 NOT(status = 2 AND recalled_at IS NULL)
 
-    CONSTRAINT `ck_Message_deleted_time`    --意义同上
+    CONSTRAINT `ck_Message_deleted_time`    -- 意义同上
         CHECK
         (
             (`status` <> 3)

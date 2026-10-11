@@ -116,9 +116,7 @@ protocolHeader::CommandType UserService::loginUser(const std::string &body, std:
     // 这里留一个检查账户状态status的repository接口
 
     // 获取对应的hash密码,用户名已经存在，那就默认密码肯定有
-    std::unique_ptr<sql::ResultSet> rs = UserRepository::getPasswordHashByUsername(username);
-    sql::SQLString PWDHash = rs->getString("password_hash");
-    std::string passwordHash(PWDHash.c_str(), PWDHash.length());
+    std::string passwordHash = UserRepository::getPasswordHashByUsername(username);
     if (PasswordHasher::verifyPassword(password, passwordHash))
     {
         printf("账户密码正确,登录成功\n");

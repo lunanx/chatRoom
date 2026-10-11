@@ -8,8 +8,7 @@ DatabaseManager::~DatabaseManager()
     disconnect();
 }
 
-
-bool DatabaseManager::Connection()
+bool DatabaseManager::connect()
 {
 
     try
@@ -66,82 +65,6 @@ bool DatabaseManager::isConnected() const
     return m_conn && !m_conn->isClosed();
 }
 
-template <typename... Args>
-int DatabaseManager::executeUpdate(const std::string &sql, const Args &...args)
-{
-    if (!isConnected)
-        std::cout<<"数据库连接已断开\n";
-        return -1;
-
-    try
-    {
-        std::unique_ptr<sql::PreparedStatement> pstmt(m_conn->prepareStatement(sql));
-
-        bindParameters(pstmt.get(), args...); // 参数绑定
-
-        return pstmt->executeUpdate();
-    }
-    catch (sql::SQLException &e)
-    {
-        std::cerr << "SQL 执行失败: " << e.what() << std::endl;
-        return -1;
-    }
-}
-
-template <typename... Args>
-std::unique_ptr<sql::ResultSet> DatabaseManager::query(const std::string &sql, const Args &...args)
-{
-    if (!isConnected)
-        return nullptr;
-
-    try
-    {
-        std::unique_ptr<sql::PreparedStatement> pstmt(m_conn->prepareStatement(sql));
-
-        bindParameters(pstmt, args); // 绑定参数
-
-        return std::unique_ptr<sql::ResultSet>(pstmt->executeQuery());
-    }
-    catch (sql::SQLException &e)
-    {
-        std::cerr << "SQL 执行失败: " << e.what() << std::endl;
-        return nullptr;
-    }
-}
-
-template <typename... Args>
-bool DatabaseManager::exisit(const std::string &sql, const Args &...args)
-{
-    if (!isConnected)
-    {
-        std::cout<<"数据库断开\n";
-        return false;
-    }
-    try
-    {
-        std::unique_ptr<sql::PreparedStatement> pstmt(m_conn->prepareStatement(sql));
-
-        bindParameters(pstmt,args);
-
-        std::unique_ptr<sql::ResultSet> rs(pstmt->executeQuery());
-
-        if (rs->next())
-        {
-
-            return true;
-        }
-        else
-        {
-            std::cout<<"不存在\n";
-            return false;
-        }
-    }
-    catch (sql::SQLException &e)
-    {
-        std::cerr << "SQL 执行失败: " << e.what() << std::endl;
-        return false;
-    }
-}
 
 void DatabaseManager::bindOne(sql::PreparedStatement &pstmt, int index, int value)
 {
@@ -157,11 +80,3 @@ void DatabaseManager::bindOne(sql::PreparedStatement &pstmt, int index, const st
 {
     pstmt.setString(index, value);
 }
-
-template <typename... Args>
-void DatabaseManager::bindParameters(sql::PreparedStatement &pstmt, const Args &...args)
-{
-    int index = 1;
-    (bindOne(pstmt, index++, args), ...);
-}
-
