@@ -4,23 +4,43 @@
 #include "model/User.h"
 #include <string>
 
+enum class UserQueryStatus
+{
+    Found,
+    NotFound,
+    Error
+};
+
+struct PasswordHashQueryResult
+{
+    UserQueryStatus status{UserQueryStatus::Error};
+    std::string passwordHash;
+};
+
+enum class CreateUserResult
+{
+    Created,
+    UsernameExists,
+    Failed
+};
+
 class UserRepository
 {
 public:
     /*
-        通过username查询用户是否存在
+        查询用户名是否存在。数据库错误与“不存在”使用不同结果表示。
     */
-    static bool findByUsername(const std::string& username);
+    static UserQueryStatus findByUsername(const std::string& username);
 
     /*
-        创建用户: 数据库中的username唯一约束是防止重复注册的最终保障
+        创建用户。并发注册发生唯一键冲突时，返回 UsernameExists。
     */
-    static bool createUser(const User& user);
+    static CreateUserResult createUser(const User& user);
 
     /*
-        获取可登录账户的密码哈希: 用户不存在或账户状态不是正常时返回空字符串
+        取得可登录账号的密码哈希。status != 1 的账号视为不可登录。
     */
-    static std::string getPasswordHashByUsername(const std::string& username);
+    static PasswordHashQueryResult getPasswordHashByUsername(const std::string& username);
     
     /*
         通过username修改用户online状态: 0表示离线，1表示在线。

@@ -77,6 +77,10 @@ bool DatabaseManager::isConnected() const
     return m_conn && !m_conn->isClosed();
 }
 
+int DatabaseManager::lastErrorCode() const
+{
+    return m_lastErrorCode;
+}
 
 void DatabaseManager::bindOne(sql::PreparedStatement &pstmt, int index, int value)
 {

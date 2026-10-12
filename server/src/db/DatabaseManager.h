@@ -9,14 +9,16 @@
 #include <string>
 
 /*
- * 查询结果需要同时保留 PreparedStatement 和 ResultSet。
- * MariaDB Connector/C++ 的 ResultSet 可能依赖创建它的 Statement，
- * 因此不能只把 ResultSet 返回给调用者、却在 query() 返回时销毁 Statement。
+    查询结果需要同时保留 PreparedStatement 和 ResultSet。
+    MariaDB Connector/C++ 的 ResultSet 可能依赖创建它的 Statement，
  */
 struct DatabaseQueryResult
 {
     std::unique_ptr<sql::PreparedStatement> statement;
     std::unique_ptr<sql::ResultSet> result;
+    // true 表示 SQL 查询已成功执行；结果集为空不代表查询失败。
+    bool succeeded{false};
+    int errorCode{0};
 };
 
 class DatabaseManager
@@ -29,6 +31,9 @@ public:
     bool connect();
     void disconnect();
     bool isConnected() const;
+
+    // 返回最近一次数据库操作的错误码；成功时为 0，非 SQL 错误时可能为 -1。
+    int lastErrorCode() const;
 
     // 执行增删改sql语句,返回受影响的行数;发生错误时返回-1
     template <typename... Args>
@@ -53,15 +58,18 @@ private:
     void bindParameters(sql::PreparedStatement &pstmt, const Args &...args);
 
     std::unique_ptr<sql::Connection> m_conn;
+    int m_lastErrorCode{0};
 };
 
 // 模块定义必须在调用它们的编译单元中可见，所以放在头文件中。
 template <typename... Args>
 inline int DatabaseManager::executeUpdate(const std::string &sql, const Args &...args)
 {
+    m_lastErrorCode = 0;
     if (!isConnected())
     {
         std::cerr << "数据库连接不可用，无法执行更新语句\n";
+        m_lastErrorCode = -1;
         return -1;
     }
 
@@ -69,14 +77,15 @@ inline int DatabaseManager::executeUpdate(const std::string &sql, const Args &..
     {
         std::unique_ptr<sql::PreparedStatement> pstmt(m_conn->prepareStatement(sql));
 
-        bindParameters(pstmt, args...); // 参数绑定
+        bindParameters(*pstmt, args...); // 参数绑定
 
         return pstmt->executeUpdate();
     }
-    catch (const sql::SQLException &e)
+    catch (sql::SQLException &e)
     {
+        m_lastErrorCode = e.getErrorCode();
         std::cerr << "SQL更新失败: " << e.what()
-                  << "，错误代码:" << e.getErrorCode() << "\n";
+                  << "，错误代码:" << e.getErrorCode() << '\n';
         return -1;
     }
 }
@@ -85,10 +94,12 @@ template <typename... Args>
 inline DatabaseQueryResult DatabaseManager::query(const std::string &sql, const Args &...args)
 {
     DatabaseQueryResult queryResult;
-
+    m_lastErrorCode = 0;
     if (!isConnected())
     {
         std::cerr << "数据库连接不可用，无法执行查询语句\n";
+        m_lastErrorCode = -1;
+        queryResult.errorCode = -1;
         return queryResult;
     }
 
@@ -99,13 +110,18 @@ inline DatabaseQueryResult DatabaseManager::query(const std::string &sql, const 
         bindParameters(*queryResult.statement, args...); // 绑定参数
 
         queryResult.result.reset(queryResult.statement->executeQuery());
+        queryResult.succeeded = true;
 
         return queryResult;
     }
-    catch (const sql::SQLException &e)
+    catch (sql::SQLException &e)
     {
+        m_lastErrorCode = e.getErrorCode();
+        queryResult.errorCode = e.getErrorCode();
         std::cerr << "SQL更新失败: " << e.what()
-                  << "，错误代码:" << e.getErrorCode() << "\n";
+                  << "，错误代码:" << e.getErrorCode() << '\n';
+        queryResult.result.reset();
+        queryResult.statement.reset();
         return DatabaseQueryResult{};
     }
 }
@@ -113,8 +129,25 @@ inline DatabaseQueryResult DatabaseManager::query(const std::string &sql, const 
 template <typename... Args>
 inline bool DatabaseManager::exisit(const std::string &sql, const Args &...args)
 {
-    DatabaseQueryResult queryResult = query(sql,args...);
-    return queryResult.result != nullptr && queryResult.result->next();
+    DatabaseQueryResult queryResult = query(sql, args...);
+    // SQL查询语句执行失败并且结果集为空
+    if (!queryResult.succeeded || !queryResult.result)
+    {
+        return false;
+    }
+
+    try
+    {
+        //SQL语句执行成功，但没有结果，就返回false
+        return queryResult.result->next();
+    }
+    catch (sql::SQLException &e)
+    {
+        m_lastErrorCode = e.getErrorCode();
+        std::cerr << "读取查询结果失败: " << e.what()
+                  << "，错误代码:" << e.getErrorCode() << '\n';
+        return false;
+    }
 }
 
 template <typename... Args>

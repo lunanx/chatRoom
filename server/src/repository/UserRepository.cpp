@@ -1,25 +1,49 @@
 #include "UserRepository.h"
 #include <iostream>
 
-bool UserRepository::findByUsername(const std::string &username)
+namespace
+{
+    // MariaDB/MySQL ER_DUP_ENTRY：违反 UNIQUE/PRIMARY KEY 约束。
+    // 消除Magic Number
+    // 如 error_code == 1062,不知道这个1062是什么东西
+    constexpr int DUPLICATE_ENTRY_ERROR = 1062;
+}
+
+UserQueryStatus UserRepository::findByUsername(const std::string &username)
 {
     DatabaseManager dbManager;
     if (!dbManager.connect())
     {
         std::cerr << "数据库连接失败，无法查询用户名\n";
-        return false;
+        return UserQueryStatus::Error;
     }
-    return dbManager.exisit(
+    auto queryResult = dbManager.query(
         "SELECT 1 FROM User WHERE username = ? LIMIT 1", username);
+
+    if (!queryResult.succeeded || !queryResult.result)
+    {
+        return UserQueryStatus::Error;
+    }
+
+    try
+    {
+        return queryResult.result->next() ? UserQueryStatus::Found : UserQueryStatus::NotFound;
+    }
+    catch (sql::SQLException &e)
+    {
+        std::cerr << "查询用户名失败: " << e.what()
+                  << "，错误代码: " << e.getErrorCode() << '\n';
+        return UserQueryStatus::Error;
+    }
 }
 
-bool UserRepository::createUser(const User &user)
+CreateUserResult UserRepository::createUser(const User &user)
 {
     DatabaseManager dbManager;
     if (!dbManager.connect())
     {
         std::cerr << "数据库连接失败，无法创建用户名\n";
-        return false;
+        return CreateUserResult::Failed;
     }
 
     const int affectedRows = dbManager.executeUpdate(
@@ -28,31 +52,56 @@ bool UserRepository::createUser(const User &user)
         user.getPasswordHash(),
         user.getNickname(),
         user.getAvatar());
-    // INSERT 正常成功时应影响一行:重复 username等SQL错误由DatabaseManager记录
-    return affectedRows == 1;
+
+    if (affectedRows == 1)
+    {
+        return CreateUserResult::Created;
+    }
+
+    if (dbManager.lastErrorCode() == DUPLICATE_ENTRY_ERROR)
+    {
+        // 预检查后其他连接可能先插入了同名用户名；由数据库唯一约束最终拦截。
+        return CreateUserResult::UsernameExists;
+    }
+
+    // INSERT 正常情况下应创建一行。0 或其他异常结果均视为失败。
+    return CreateUserResult::Failed;
 }
 
-std::string UserRepository::getPasswordHashByUsername(const std::string &username)
+PasswordHashQueryResult UserRepository::getPasswordHashByUsername(const std::string &username)
 {
     DatabaseManager dbManager;
     if (!dbManager.connect())
     {
         std::cerr << "数据库连接失败，无法查询" << username << "用户的密码哈希\n";
-        return {};
+        return {UserQueryStatus::Error, {}};
     }
 
-    // status = 1是正常账户;禁止已禁用或已注销的账户登录
+    // 只允许正常账号登录。用户名不存在和账号不可用都不会返回密码哈希。
     auto queryResult = dbManager.query(
         "SELECT password_hash FROM User WHERE username = ? AND status = 1 LIMIT 1",
         username);
 
-    if (!queryResult.result || !queryResult.result->next())
+    if (!queryResult.succeeded || !queryResult.result)
     {
-        return {};
+        return {UserQueryStatus::Error, {}};
     }
 
-    const sql::SQLString hash = queryResult.result->getString("password_hash");
-    return std::string(hash.c_str(), hash.length());
+    try
+    {
+        if (!queryResult.result->next())
+        {
+            return {UserQueryStatus::NotFound, {}};
+        }
+        const sql::SQLString hash = queryResult.result->getString("password_hash");
+        return {UserQueryStatus::Found, std::string(hash.c_str(), hash.length())};
+    }
+    catch (sql::SQLException &e)
+    {
+        std::cerr << "查询用户密码哈希失败: " << e.what()
+                  << "，错误代码: " << e.getErrorCode() << '\n';
+        return {UserQueryStatus::Error, {}};
+    }
 }
 
 bool UserRepository::updateOnlineStatusByUsername(const std::string &username, int status)
@@ -70,7 +119,7 @@ bool UserRepository::updateOnlineStatusByUsername(const std::string &username, i
         return false;
     }
 
-    //状态相同的UPDATE在部分数据库配置下可能返回0，所以只以-1代表SQL错误
+    // UPDATE 返回 0 也可能代表字段原本就是目标值；只有 -1 表示本层检测到 SQL 错误。
     return dbManager.executeUpdate(
-        "UPDATE User SET online = ? WHERE username = ?", status, username) >= 0;
+               "UPDATE User SET online = ? WHERE username = ?", status, username) >= 0;
 }
