@@ -14,10 +14,10 @@ public:
         const std::string &nickname,
         const std::string &avatar);
 
-    const std::string& getUsername();
-    const std::string& getPasswordHash();
-    const std::string& getNickname();
-    const std::string& getAvatar();
+    const std::string& getUsername() const;
+    const std::string& getPasswordHash() const;
+    const std::string& getNickname() const;
+    const std::string& getAvatar() const;
 
         
 private:

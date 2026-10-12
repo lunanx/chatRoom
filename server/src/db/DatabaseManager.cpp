@@ -1,5 +1,7 @@
 #include "DatabaseManager.h"
 #include <iostream>
+#include <cstdlib>
+
 
 DatabaseManager::DatabaseManager() = default;
 
@@ -8,13 +10,23 @@ DatabaseManager::~DatabaseManager()
     disconnect();
 }
 
+
 bool DatabaseManager::connect()
 {
 
     try
     {
         // 获取configDB基础数据
-        DBconfig config = DatabaseConfig::loadDBConfig("config/database.conf");
+        // 环境变量允许临时指定配置文件
+        // 优先读取环境变量CHATROOM_DB_CONFIG，没有设置时用CMake配置的默认路径
+        const char* configPath = std::getenv("CHATROOM_DB_CONFIG");
+#ifdef CHATROOM_DB_CONFIG_FILE
+        const std::string defaultConfigPath = CHATROOM_DB_CONFIG_FILE;
+#else
+        const std::string defaultConfigPath = "config/database.conf";
+#endif
+        std::string configFile = configPath != nullptr && configPath[0] !='\0'?configPath:defaultConfigPath;
+        DBconfig config = DatabaseConfig::loadDBConfig(configFile);
         // 获取MariaDB驱动
         sql::Driver *driver = sql::mariadb::get_driver_instance();
         // 配置数据库连接地址

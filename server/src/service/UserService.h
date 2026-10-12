@@ -12,8 +12,7 @@ class UserService
 public:
     /*
         注册业务
-        这里先留着responseBody参数
-        由于body正文部分的格式还没确定，这里先不着急,继续写架构
+        body是客户端发来的JSON字符串;responseBody是服务器返回的JSON字符串。
     */
     static protocolHeader::CommandType registerUser(const std::string &body, std::string &responseBody);
 
@@ -23,7 +22,8 @@ public:
     static protocolHeader::CommandType loginUser(const std::string &body, std::string &responseBody);
 
     /*
-        退出登录业务
+        退出登录业务。当前最小版本要求客户端提交username/password进行重新验证;
+        后续应改为使用ClientSession 中绑定的登录身份,避免依赖客户端重复提交身份。
     */
     static protocolHeader::CommandType logoutUser(const std::string &body, std::string &responseBody);
 

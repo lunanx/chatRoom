@@ -1,7 +1,35 @@
 #include "UserService.h"
+#include "protocol/ProtocolBody.h"
 #include <string>
 #include <regex>
-protocolHeader::CommandType UserService::registerUser(const std::string &body, std::string &responseBody)
+
+/*
+目前响应格式统一为
+{
+  "code": 8,
+  "message": "注册成功"
+}
+*/
+namespace
+{
+    // 统一生成服务器响应Body;以后替换响应格式只需要集中修改这里
+    protocolHeader::CommandType setResponse(
+        std::string &responseBody,
+        protocolHeader::CommandType command,
+        const std::string &message)
+    {
+        const nlohmann::json response = {
+            {protocolHeader::CODE, static_cast<std::uint16_t>(command)},
+            {protocolHeader::MESSAGE, message}};
+
+        responseBody = response.dump();
+        return command;
+    }
+}
+
+protocolHeader::CommandType UserService::registerUser(
+    const std::string &body,
+    std::string &responseBody)
 {
     /*
         username,password,nickname,avatar
@@ -20,67 +48,67 @@ protocolHeader::CommandType UserService::registerUser(const std::string &body, s
     if (!validateRegisterRequest(body, data))
     {
         printf("数据类型校验不通过,注册失败\n");
-        return protocolHeader::CommandType::REGISTER_FAILED;
+        return setResponse(responseBody, protocolHeader::CommandType::REGISTER_FAILED, "注册请求格式不正确");
     }
 
     // 检查username
-    std::string username = data["username"].get<std::string>();
+    std::string username = data[protocolHeader::USERNAME].get<std::string>();
     if (!isValidUsername(username))
     {
         printf("用户名校验不通过,注册失败\n");
-        return protocolHeader::CommandType::REGISTER_FAILED;
+        return setResponse(responseBody, protocolHeader::CommandType::REGISTER_FAILED, "用户名格式不正确");
     }
+
     // 检查password
-    std::string password = data["password"].get<std::string>();
+    std::string password = data[protocolHeader::PASSWORD].get<std::string>();
     if (!isValidPassword(password))
     {
         printf("密码校验不通过,注册失败\n");
-        return protocolHeader::CommandType::REGISTER_FAILED;
+        return setResponse(responseBody, protocolHeader::CommandType::REGISTER_FAILED, "密码长度必须为8~64字节");
     }
     // 检查昵称
-    std::string nickname = data["nickname"].get<std::string>();
+    std::string nickname = data[protocolHeader::NICKNAME].get<std::string>();
     if (!isValidNickname(nickname))
     {
         printf("昵称校验不通过,注册失败\n");
-        return protocolHeader::CommandType::REGISTER_FAILED;
+        return setResponse(responseBody, protocolHeader::CommandType::REGISTER_FAILED, "昵称不能为空且不能超过64字节");
     }
     // 检查头像资源地址
     std::string avatar;
-    if (data.contains("avatar") && !data["avatar"].is_null())
+    if (data.contains(protocolHeader::AVATAR) && !data[protocolHeader::AVATAR].is_null())
     {
-        avatar = data["avatar"].get<std::string>();
+        avatar = data[protocolHeader::AVATAR].get<std::string>();
         if (!isValidAvatar(avatar))
         {
             printf("头像资源地址校验不通过,注册失败\n");
-            return protocolHeader::CommandType::REGISTER_FAILED;
+            return setResponse(responseBody, protocolHeader::CommandType::REGISTER_FAILED, "头像地址不能超过1024字节");
         }
     }
+
     // 检查用户名是否存在
     if (UserRepository::findByUsername(username))
     {
         printf("用户名已存在,注册失败\n");
-        return protocolHeader::CommandType::REGISTER_FAILED;
+        return setResponse(responseBody, protocolHeader::CommandType::REGISTER_FAILED, "用户名已存在");
     }
+
     // 密码进行哈希转换
     std::string passwordHash;
     if (!PasswordHasher::hashPassword(password, passwordHash))
     {
         printf("密码哈希转换失败\n");
-        return protocolHeader::CommandType::REGISTER_FAILED;
+        return setResponse(responseBody, protocolHeader::CommandType::REGISTER_FAILED, "服务器暂时无法处理注册请求");
     }
     // 构造User
-    User u(username, passwordHash, nickname, avatar);
-
+    User user(username, passwordHash, nickname, avatar);
     // 保存至数据库
-    if (UserRepository::createUser(u))
+    if (!UserRepository::createUser(user))
     {
-        printf("注册成功\n");
-        return protocolHeader::CommandType::REGISTER_SUCCESS;
+        printf("数据库创建用户失败\n");
+        return setResponse(responseBody, protocolHeader::CommandType::REGISTER_FAILED, "注册失败,请稍后重试");
     }
-    else
-    {
-        return protocolHeader::CommandType::REGISTER_FAILED;
-    }
+    printf("注册成功\n");
+    return setResponse(responseBody, protocolHeader::CommandType::REGISTER_SUCCESS, "注册成功");
 }
 
 protocolHeader::CommandType UserService::loginUser(const std::string &body, std::string &responseBody)
@@ -90,43 +118,48 @@ protocolHeader::CommandType UserService::loginUser(const std::string &body, std:
     if (!validateLoginRequest(body, data))
     {
         printf("数据类型校验不通过,登录失败\n");
-        return protocolHeader::CommandType::LOGIN_FAILED;
+        return setResponse(responseBody, protocolHeader::CommandType::LOGIN_FAILED, "登录请求格式不正确");
     }
     // 检查username
-    std::string username = data["username"].get<std::string>();
+    std::string username = data[protocolHeader::USERNAME].get<std::string>();
     if (!isValidUsername(username))
     {
         printf("用户名校验不通过,登录失败\n");
-        return protocolHeader::CommandType::LOGIN_FAILED;
+        return setResponse(responseBody, protocolHeader::CommandType::LOGIN_FAILED, "用户名或密码错误");
     }
     // 检查password
-    std::string password = data["password"].get<std::string>();
+    std::string password = data[protocolHeader::PASSWORD].get<std::string>();
     if (!isValidPassword(password))
     {
         printf("密码校验不通过,登录失败\n");
-        return protocolHeader::CommandType::LOGIN_FAILED;
-    }
-    // 检查用户名是否存在
-    if (!UserRepository::findByUsername(username))
-    {
-        printf("用户名不存在,登录失败\n");
-        return protocolHeader::CommandType::LOGIN_FAILED;
+        return setResponse(responseBody, protocolHeader::CommandType::LOGIN_FAILED, "用户名或密码错误");
     }
 
-    // 这里留一个检查账户状态status的repository接口
-
-    // 获取对应的hash密码,用户名已经存在，那就默认密码肯定有
+    // Repository只返回正常账号(status=1)的哈希，不存在或不可用都会返回空字符串
     std::string passwordHash = UserRepository::getPasswordHashByUsername(username);
-    if (PasswordHasher::verifyPassword(password, passwordHash))
+    if (passwordHash.empty())
     {
-        printf("账户密码正确,登录成功\n");
-        return protocolHeader::CommandType::LOGIN_SUCCESS;
+        printf("用户名不存在、账号不可用，登录失败\n");
+        return setResponse(responseBody, protocolHeader::CommandType::LOGIN_FAILED, "用户名不存在或账号不可用");
     }
     else
     {
-        printf("账户密码错误,登录失败\n");
-        return protocolHeader::CommandType::LOGIN_FAILED;
+        if (!PasswordHasher::verifyPassword(password, passwordHash))
+        {
+            printf("密码错误，登录失败\n");
+            return setResponse(responseBody, protocolHeader::CommandType::LOGIN_FAILED, "用户名或密码错误");
+        }
     }
+
+    // 密码正确，更新用户在线状态，更新失败不向客户端报告登录成功
+    if (!UserRepository::updateOnlineStatusByUsername(username, 1))
+    {
+        printf("更新用户在线状态失败，登录失败");
+        return setResponse(responseBody, protocolHeader::CommandType::LOGIN_FAILED, "用户名或密码错误");
+    }
+
+    printf("账户密码正确，登录成功\n");
+    return setResponse(responseBody, protocolHeader::CommandType::LOGIN_SUCCESS, "登陆成功");
 }
 
 protocolHeader::CommandType UserService::logoutUser(const std::string &body, std::string &responseBody)
@@ -136,31 +169,49 @@ protocolHeader::CommandType UserService::logoutUser(const std::string &body, std
     if (!validateLoginRequest(body, data))
     {
         printf("数据类型校验不通过,退出登录失败\n");
-        return protocolHeader::CommandType::LOGOUT_FAILED;
+        return setResponse(responseBody, protocolHeader::CommandType::LOGOUT_FAILED, "退出登录请求格式不正确");
     }
+
     // 检查username
-    std::string username = data["username"].get<std::string>();
+    std::string username = data[protocolHeader::USERNAME].get<std::string>();
     if (!isValidUsername(username))
     {
         printf("用户名校验不通过,退出登录失败\n");
-        return protocolHeader::CommandType::LOGOUT_FAILED;
+        return setResponse(responseBody, protocolHeader::CommandType::LOGOUT_FAILED, "用户名或密码错误");
     }
-    // 检查用户名是否存在，验证防止错误信息
-    if (!UserRepository::findByUsername(username))
+    // 检查password
+    std::string password = data[protocolHeader::PASSWORD].get<std::string>();
+    if (!isValidPassword(password))
     {
-        printf("用户名不存在,退出登录失败\n");
-        return protocolHeader::CommandType::LOGOUT_FAILED;
+        printf("密码校验不通过,退出登录失败\n");
+        return setResponse(responseBody, protocolHeader::CommandType::LOGOUT_FAILED, "用户名或密码错误");
     }
-    if (UserRepository::updateOnlineStatusByUsername(username, 0))
+
+    // 当前最小实现用账户密码验证退出请求。后续应将登录身份绑定到 ClientSession
+    // 再由连接身份完成退出，而不是每次退出都信任客户端提供的username
+    std::string passwordHash = UserRepository::getPasswordHashByUsername(username);
+    if (passwordHash.empty())
     {
-        printf("退出登录成功\n");
-        return protocolHeader::CommandType::LOGOUT_SUCCESS;
+        printf("账号验证失败，退出登录失败\n");
+        return setResponse(responseBody, protocolHeader::CommandType::LOGOUT_FAILED, "用户名不存在或账号不可用");
     }
-    else // 一般来说不会失败，但仍然检验
+    else
     {
-        printf("退出登入失败\n");
-        return protocolHeader::CommandType::LOGOUT_FAILED;
+        if (!PasswordHasher::verifyPassword(password, passwordHash))
+        {
+            printf("账号验证失败，退出登录失败\n");
+            return setResponse(responseBody, protocolHeader::CommandType::LOGOUT_FAILED, "用户名或密码错误");
+        }
     }
+
+    if (!UserRepository::updateOnlineStatusByUsername(username, 0))
+    {
+        printf("更新用户在线状态失败，退出登录失败\n");
+        return setResponse(responseBody, protocolHeader::CommandType::LOGOUT_FAILED, "服务器暂时无法处理退出登录");
+    }
+
+    printf("退出登录成功\n");
+    return setResponse(responseBody, protocolHeader::CommandType::LOGOUT_SUCCESS, "退出登录成功");
 }
 
 bool UserService::validateRegisterRequest(const std::string &body, nlohmann::json &data)
@@ -176,27 +227,66 @@ bool UserService::validateRegisterRequest(const std::string &body, nlohmann::jso
         return false;
     }
 
-    if (!data.contains("username") || !data["username"].is_string())
+    if(!data.is_object())
     {
-        printf("username 不存在 或者 存在,但不是字符串\n");
+        printf("JSON Body必须是对象\n");
         return false;
     }
 
-    if (!data.contains("password") || !data["password"].is_string())
+    if (!data.contains(protocolHeader::USERNAME) || !data[protocolHeader::USERNAME].is_string())
     {
-        printf("password 不存在 或者 存在,但不是字符串\n");
+        printf("username 不存在或者不是字符串\n");
         return false;
     }
 
-    if (!data.contains("nickname") || !data["nickname"].is_string())
+    if (!data.contains(protocolHeader::PASSWORD) || !data[protocolHeader::PASSWORD].is_string())
     {
-        printf("nickname 不存在 或者 存在,但不是字符串\n");
+        printf("password 不存在或者不是字符串\n");
         return false;
     }
 
-    if (data.contains("avatar") && !data["avatar"].is_string() && !data["avatar"].is_null())
+    if (!data.contains(protocolHeader::NICKNAME) || !data[protocolHeader::NICKNAME].is_string())
     {
-        printf("avatar 存在,但值不是字符串也不是null\n");
+        printf("nickname 不存在或者不是字符串\n");
+        return false;
+    }
+
+    if (data.contains(protocolHeader::AVATAR) && !data[protocolHeader::AVATAR].is_string() && !data[protocolHeader::AVATAR].is_null())
+    {
+        printf("avatar必须是字符串或null\n");
+        return false;
+    }
+
+    return true;
+}
+
+bool UserService::validateLoginRequest(const std::string &body, nlohmann::json &data)
+{
+    try
+    {
+        data = nlohmann::json::parse(body);
+    }
+    catch (const nlohmann::json::parse_error &)
+    {
+        printf("JSON 格式错误\n");
+        return false;
+    }
+
+    if(!data.is_object())
+    {
+        printf("JSON Body 必须是对象\n");
+        return false;
+    }
+
+    if (!data.contains(protocolHeader::USERNAME) || !data[protocolHeader::USERNAME].is_string())
+    {
+        printf("username 不存在或者不是字符串\n");
+        return false;
+    }
+
+    if (!data.contains(protocolHeader::PASSWORD) || !data[protocolHeader::PASSWORD].is_string())
+    {
+        printf("password 不存在或者不是字符串\n");
         return false;
     }
 
@@ -221,17 +311,7 @@ bool UserService::isValidPassword(const std::string &password)
 
 bool UserService::isValidNickname(const std::string &nickname)
 {
-    if (nickname.empty())
-    {
-        return false;
-    }
-
-    if (nickname.size() > 64)
-    {
-        return false;
-    }
-
-    return true;
+    return !nickname.empty() && nickname.size() <= 64;
 }
 
 bool UserService::isValidAvatar(const std::string &avatar)
@@ -239,29 +319,3 @@ bool UserService::isValidAvatar(const std::string &avatar)
     return avatar.empty() || avatar.size() <= 1024;
 }
 
-bool UserService::validateLoginRequest(const std::string &body, nlohmann::json &data)
-{
-    try
-    {
-        data = nlohmann::json::parse(body);
-    }
-    catch (const nlohmann::json::parse_error &)
-    {
-        printf("JSON 格式错误\n");
-        return false;
-    }
-
-    if (!data.contains("username") || !data["username"].is_string())
-    {
-        printf("username 不存在 或者 存在,但不是字符串\n");
-        return false;
-    }
-
-    if (!data.contains("password") || !data["password"].is_string())
-    {
-        printf("password 不存在 或者 存在,但不是字符串\n");
-        return false;
-    }
-
-    return true;
-}

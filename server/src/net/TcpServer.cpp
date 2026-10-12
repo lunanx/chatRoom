@@ -1,10 +1,14 @@
 #include "TcpServer.h"
+#include "ServerConfig.h"
 #include <unistd.h>
 #include <sys/types.h>
 #include <sys/socket.h>
 #include <netinet/in.h>
 #include <arpa/inet.h>
 #include <fcntl.h>
+#include <cstdlib>
+#include <iostream>
+#include <stdexcept>
 
 TcpServer::TcpServer()
     : m_sfd(-1),
@@ -12,9 +16,6 @@ TcpServer::TcpServer()
       m_saddr{},
       m_epollReactor(nullptr)
 {
-    m_saddr.sin_family = AF_INET;
-    m_saddr.sin_addr.s_addr = inet_addr(SERVER_HOST_ADDR);
-    m_saddr.sin_port = htons(SERVER_HOST_PORT);
 }
 
 TcpServer::~TcpServer()
@@ -30,6 +31,32 @@ TcpServer::~TcpServer()
 
 bool TcpServer::init()
 {
+    // 服务器监听配置与数据库配置分开管理;环境变量可覆盖默认配置文件路径
+    const char *configuredPath = std::getenv("CHATROOM_SERVER_CONFIG");
+#ifdef CHATROOM_SERVER_CONFIG_FILE
+    const std::string defaultConfigPath = CHATROOM_SERVER_CONFIG_FILE;
+#else
+    const std::string defaultConfigPath = "config/server.conf";
+#endif
+    try
+    {
+        const std::string configPath = configuredPath != nullptr && configuredPath[0] != '\0'?std::string(configuredPath):defaultConfigPath;
+        const ServerConfig config = ServerConfig::loadServerConfig(configPath);
+        m_saddr = {};
+        m_saddr.sin_family = AF_INET;
+        m_saddr.sin_port = htons(config.port);
+        if(inet_pton(AF_INET,config.host.c_str(),&m_saddr.sin_addr) != 1)
+        {
+            std::cerr << "SERVER_HOST不是有效的IPv4地址: "<<config.host<<'\n';
+            return false;
+        }
+    }
+    catch(const std::exception &e)
+    {
+        std::cerr<<"加载服务器配置失败: "<<e.what()<<'\n';
+        return false;
+    }
+
     m_sfd = socket(AF_INET, SOCK_STREAM, 0);
     if (m_sfd == -1)
     {

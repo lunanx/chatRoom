@@ -1,70 +1,76 @@
 #include "UserRepository.h"
+#include <iostream>
 
 bool UserRepository::findByUsername(const std::string &username)
 {
-    DatabaseManager DBManager;
-    if(!DBManager.connect())
+    DatabaseManager dbManager;
+    if (!dbManager.connect())
     {
-        printf("数据库连接失败\n");
+        std::cerr << "数据库连接失败，无法查询用户名\n";
         return false;
     }
-    return DBManager.exisit(
+    return dbManager.exisit(
         "SELECT 1 FROM User WHERE username = ? LIMIT 1", username);
 }
 
 bool UserRepository::createUser(const User &user)
 {
-    DatabaseManager DBManager;
-    if(!DBManager.connect())
+    DatabaseManager dbManager;
+    if (!dbManager.connect())
     {
-        printf("数据库连接失败\n");
+        std::cerr << "数据库连接失败，无法创建用户名\n";
         return false;
     }
-    std::int32_t res = DBManager.executeUpdate(
-        "INSERT INTO User (username, password_hash, nickname, avatar) VALUES (?, ?, ?, ?)",
-        const_cast<User &>(user).getUsername(),
-        const_cast<User &>(user).getPasswordHash(),
-        const_cast<User &>(user).getNickname(),
-        const_cast<User &>(user).getAvatar());
-    if (res == 0)
-    {
-        std::cout << "已存在,插入失败\n";
-        return false;
-    }
-    else if (res == -1)
-    {
-        return false;
-    }
-    else
-    {
-        return true;
-    }
+
+    const int affectedRows = dbManager.executeUpdate(
+        "INSERT INTO User (username,password_hash,nickname,avatar) VALUES (?, ?, ?, ?)",
+        user.getUsername(),
+        user.getPasswordHash(),
+        user.getNickname(),
+        user.getAvatar());
+    // INSERT 正常成功时应影响一行:重复 username等SQL错误由DatabaseManager记录
+    return affectedRows == 1;
 }
 
 std::string UserRepository::getPasswordHashByUsername(const std::string &username)
 {
-    DatabaseManager DBManager;
-    if(!DBManager.connect())
+    DatabaseManager dbManager;
+    if (!dbManager.connect())
     {
-        printf("数据库连接失败\n");
-        return "";
+        std::cerr << "数据库连接失败，无法查询" << username << "用户的密码哈希\n";
+        return {};
     }
-    std::unique_ptr<sql::ResultSet> rs = DBManager.query(
-        "SELECT password_hash FROM User WHERE username = ? LIMIT 1", username);
-    sql::SQLString PWDHash = rs->getString("password_hash");
-    std::string passwordHash(PWDHash.c_str(), PWDHash.length());
-    return passwordHash;
+
+    // status = 1是正常账户;禁止已禁用或已注销的账户登录
+    auto queryResult = dbManager.query(
+        "SELECT password_hash FROM User WHERE username = ? AND status = 1 LIMIT 1",
+        username);
+
+    if (!queryResult.result || !queryResult.result->next())
+    {
+        return {};
+    }
+
+    const sql::SQLString hash = queryResult.result->getString("password_hash");
+    return std::string(hash.c_str(), hash.length());
 }
 
-bool UserRepository::updateOnlineStatusByUsername(const std::string &username,int status)
+bool UserRepository::updateOnlineStatusByUsername(const std::string &username, int status)
 {
-    DatabaseManager DBManager;
-    if(!DBManager.connect())
+    if (status != 0 && status != 1)
     {
-        printf("数据库连接失败\n");
+        std::cerr << "在线状态值无效，只允许0或1\n";
         return false;
     }
-    return DBManager.executeUpdate(
-        "UPDATE User SET online = ? WHERE username = ?",status,username
-    ) > 0;
+
+    DatabaseManager dbManager;
+    if (!dbManager.connect())
+    {
+        std::cerr << "数据库连接失败，无法更新" << username << "用户的在线状态\n";
+        return false;
+    }
+
+    //状态相同的UPDATE在部分数据库配置下可能返回0，所以只以-1代表SQL错误
+    return dbManager.executeUpdate(
+        "UPDATE User SET online = ? WHERE username = ?", status, username) >= 0;
 }

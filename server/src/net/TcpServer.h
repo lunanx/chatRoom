@@ -5,8 +5,6 @@
 #include <netinet/in.h>
 #include <arpa/inet.h>
 #include "EpollReactor.h"
-#define SERVER_HOST_PORT 8888
-#define SERVER_HOST_ADDR "192.168.230.128"
 
 /*
     TcpServer用于初始化服务器

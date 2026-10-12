@@ -12,22 +12,22 @@ User::User(
 {
 }
 
-const std::string& User::getUsername()
+const std::string& User::getUsername() const
 {
     return m_username;
 }
 
-const std::string& User::getPasswordHash()
+const std::string& User::getPasswordHash() const
 {
     return m_passwordHash;
 }
 
-const std::string& User::getNickname()
+const std::string& User::getNickname() const
 {
     return m_nickname;
 }
 
-const std::string& User::getAvatar()
+const std::string& User::getAvatar() const
 {
     return m_avatar;
 }
