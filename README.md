@@ -45,3 +45,39 @@ ctest --test-dir build-protocol-only --output-on-failure
 python3 server/tests/tcp_protocol_test.py --host 127.0.0.1 --port 8888
 ```
 
+
+### 注册/登录业务异常分支测试
+
+`server/tests/business_error_branch_test.py` 会针对当前协议验证以下场景：重复注册、注册缺少 `nickname`、非法 JSON、用户名格式错误、过短密码、错误密码登录、不存在的用户名、登录缺少 `password`、错误密码退出登录，以及正确登录/退出登录。脚本会创建一个自动生成的测试账号，不会自动删除数据库记录。
+
+确认服务端和 MariaDB 正常运行后，在项目根目录执行：
+
+```bash
+python3 server/tests/business_error_branch_test.py
+```
+
+如果也想检查数据库中的 `User.online` 字段，可以添加 `--verify-db-state`。该模式会调用 `mysql` 或 `mariadb` 命令行客户端读取 `config/database.conf` 并检查注册后为 `0`、登录成功后为 `1`、错误密码退出后仍为 `1`、正常退出后回到 `0`：
+
+```bash
+python3 server/tests/business_error_branch_test.py --verify-db-state
+```
+
+#### 单独验证数据库连接失败分支
+
+这个模式不会自行停止 MariaDB，也不会改动数据库。最安全的验证方式是先按 `Ctrl+C` 停掉当前服务端进程，复制一份配置并将数据库端口改成一个没有服务监听的端口（例如 `1`）：
+
+```bash
+cp config/database.conf /tmp/chatroom-db-unavailable.conf
+sed -i 's/^DB_PORT=.*/DB_PORT=1/' /tmp/chatroom-db-unavailable.conf
+chmod 600 /tmp/chatroom-db-unavailable.conf
+CHATROOM_DB_CONFIG=/tmp/chatroom-db-unavailable.conf ./build/server/InternetChatRoomServer
+```
+
+保持这个服务端运行，再开一个终端执行：
+
+```bash
+python3 server/tests/business_error_branch_test.py --database-unavailable-only
+```
+
+预期注册和登录都应返回相应失败命令，`message` 包含“服务器暂时无法处理”，而不是误报成功或把数据库故障说成“用户名不存在”。测试完成后按 `Ctrl+C` 关闭这个使用临时错误配置的服务端，再正常启动 `./build/server/InternetChatRoomServer`。`/tmp/chatroom-db-unavailable.conf` 仅用于故障测试，不要覆盖正式的 `config/database.conf`。
+
