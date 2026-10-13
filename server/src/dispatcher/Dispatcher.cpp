@@ -38,28 +38,31 @@ protocolHeader::PacketFrame Dispatcher::dispatch(const protocolHeader::PacketFra
     std::string responseBody;
     try
     {
-        switch (command)
+        if (command == protocolHeader::CommandType::REGISTER_REQUEST)
         {
-        case protocolHeader::CommandType::REGISTER_REQUEST:
             responseCommand = UserService::registerUser(frame.m_body, responseBody);
-            break;
+        }
+        else if (command == protocolHeader::CommandType::LOGIN_REQUEST)
+        {
+            int userId = -1;
+            std::string username = {};
+            responseCommand = UserService::loginUser(
+                frame.m_body, responseBody, userId, username);
+            if(responseCommand == protocolHeader::CommandType::LOGIN_SUCCESS)
+            {
 
-        case protocolHeader::CommandType::LOGIN_REQUEST:
-            responseCommand = UserService::loginUser(frame.m_body, responseBody);
-            break;
-
-        case protocolHeader::CommandType::LOGOUT_REQUEST:
+            }
+        }
+        else if (command == protocolHeader::CommandType::LOGOUT_REQUEST)
+        {
             responseCommand = UserService::logoutUser(frame.m_body, responseBody);
-            break;
-
-        default:
+        }
+        else
         {
             // 未实现的命令也返回合法 JSON，避免客户端解析响应时遇到空白或非法内容。
             responseBody = makeResponseBody(
                 protocolHeader::CommandType::UNKNOWN,
                 "当前请求类型尚未实现");
-            break;
-        }
         }
     }
     catch (const std::exception &e)
@@ -69,15 +72,20 @@ protocolHeader::PacketFrame Dispatcher::dispatch(const protocolHeader::PacketFra
         responseCommand = failureCommandFor(command);
         responseBody = makeResponseBody(responseCommand, "服务器暂时无法处理请求，请稍后重试");
     }
-    catch(...)
+    catch (...)
     {
-        std::cerr<<"请求处理发生未知异常\n";
+        std::cerr << "请求处理发生未知异常\n";
         responseCommand = failureCommandFor(command);
-        responseBody = makeResponseBody(responseCommand,"服务器暂时无法处理请求，请稍后重试");
+        responseBody = makeResponseBody(responseCommand, "服务器暂时无法处理请求，请稍后重试");
     }
 
     return protocolHeader::PacketFrame(
         static_cast<std::uint16_t>(responseCommand),
         responseBody,
         frame.m_requestId);
+}
+
+void Dispatcher::setCliSession(const ClientSession &cli)
+{
+    m_cli = cli;
 }

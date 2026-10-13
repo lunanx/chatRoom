@@ -13,7 +13,7 @@ ClientSession::~ClientSession()
         close(m_cfd);
 }
 
-int ClientSession::handle_write(const std::string &data,int flags)
+int ClientSession::handle_write(const std::string &data, int flags)
 {
 
     // 将新数据写入缓冲，可能还残留上次未发送的数据
@@ -108,17 +108,47 @@ std::string ClientSession::getWriteBuf()
     return m_writeBuf;
 }
 
-std::string& ClientSession::getRecvBuf()
+std::string &ClientSession::getRecvBuf()
 {
     return m_recvBuf;
 }
 
 bool ClientSession::hasWriteBufPending()
 {
-    if(m_writeBuf.empty())
+    if (m_writeBuf.empty())
     {
         return false;
     }
 
     return true;
+}
+
+void ClientSession::setAuthenticated(bool status)
+{
+    m_isAuthenticated = status;
+}
+
+void ClientSession::setUserId(int id)
+{
+    m_userId = id;
+}
+
+void ClientSession::setUsername(const std::string &name)
+{
+    m_username = name;
+}
+
+bool ClientSession::getAuthenticated()
+{
+    return m_isAuthenticated;
+}
+
+int ClientSession::getUserId()
+{
+    return m_userId;
+}
+
+std::string ClientSession::getUsername()
+{
+    return m_username;
 }

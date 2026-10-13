@@ -139,7 +139,7 @@ protocolHeader::CommandType UserService::registerUser(
     return setResponse(responseBody, protocolHeader::CommandType::REGISTER_SUCCESS, "注册成功");
 }
 
-protocolHeader::CommandType UserService::loginUser(const std::string &body, std::string &responseBody)
+protocolHeader::CommandType UserService::loginUser(const std::string &body, std::string &responseBody, int &userId, std::string &name)
 {
     nlohmann::json data;
     // 校验JSON、username、password
@@ -164,14 +164,14 @@ protocolHeader::CommandType UserService::loginUser(const std::string &body, std:
     }
 
     // 区分“账号不可用”和“数据库查询失败”，避免把服务器故障误报为账号不存在。
-    const PasswordHashQueryResult hashResult = UserRepository::getPasswordHashByUsername(username);
-    if (hashResult.status == UserQueryStatus::Error)
+    const PasswordHashQueryResult infoResult = UserRepository::getUserInfoForLoginByUsername(username);
+    if (infoResult.status == UserQueryStatus::Error)
     {
         printf("查询密码哈希失败，登录暂时无法完成\n");
         return setResponse(responseBody, protocolHeader::CommandType::LOGIN_FAILED, "服务器暂时无法处理登录请求，请稍后重试");
     }
-    if (hashResult.status == UserQueryStatus::NotFound ||
-        !PasswordHasher::verifyPassword(password, hashResult.passwordHash))
+    if (infoResult.status == UserQueryStatus::NotFound ||
+        !PasswordHasher::verifyPassword(password, infoResult.passwordHash))
     {
         printf("用户名或密码错误，登录失败\n");
         return setResponse(responseBody, protocolHeader::CommandType::LOGIN_FAILED, "用户名或密码错误");
@@ -185,6 +185,9 @@ protocolHeader::CommandType UserService::loginUser(const std::string &body, std:
     }
 
     printf("账户密码正确，登录成功\n");
+    //登录成功设置id 和 username
+    userId = infoResult.userId;
+    username = infoResult.username;
     return setResponse(responseBody, protocolHeader::CommandType::LOGIN_SUCCESS, "登录成功");
 }
 
@@ -215,7 +218,7 @@ protocolHeader::CommandType UserService::logoutUser(const std::string &body, std
 
     // 当前最小实现用账户密码验证退出请求。后续应将登录身份绑定到 ClientSession
     // 再由连接身份完成退出，而不是每次退出都信任客户端提供的username
-    const PasswordHashQueryResult hashResult = UserRepository::getPasswordHashByUsername(username);
+    const PasswordHashQueryResult hashResult = UserRepository::getUserInfoForLoginByUsername(username);
     if (hashResult.status == UserQueryStatus::Error)
     {
         printf("查询密码哈希失败，退出登录暂时无法完成\n");
@@ -320,7 +323,7 @@ bool UserService::validateLoginRequest(const std::string &body, nlohmann::json &
 
 bool UserService::isValidUsername(const std::string &username)
 {
-    //由于下面regex的作用不需要转换实际Unicode码点
+    // 由于下面regex的作用不需要转换实际Unicode码点
     if (username.size() < 3 || username.size() > 32)
     {
         return false;
@@ -332,7 +335,7 @@ bool UserService::isValidUsername(const std::string &username)
 
 bool UserService::isValidPassword(const std::string &password)
 {
-    //由于下面regex的作用不需要转换实际Unicode码点
+    // 由于下面regex的作用不需要转换实际Unicode码点
     if (password.size() < 8 || password.size() > 64)
     {
         return false;
@@ -344,12 +347,12 @@ bool UserService::isValidPassword(const std::string &password)
 
 bool UserService::isValidNickname(const std::string &nickname)
 {
-    //昵称需要转换为Unicode码点
-    return !nickname.empty() && utf8CharacterCount(nickname) <= 64 &&nickname.size() <= 256;
+    // 昵称需要转换为Unicode码点
+    return !nickname.empty() && utf8CharacterCount(nickname) <= 64 && nickname.size() <= 256;
 }
 
 bool UserService::isValidAvatar(const std::string &avatar)
 {
-    
+
     return avatar.empty() || (utf8CharacterCount(avatar) <= 1024 && avatar.size() <= 4096);
 }

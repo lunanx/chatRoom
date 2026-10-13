@@ -526,6 +526,7 @@ void SubReactor::reactor(int reactorId)
                 }
                 // 注意ClientSession里面封装了读写事件
                 auto cli = it->second;
+                m_dispatcher.setCliSession(*cli);
                 if (events & EPOLLERR)
                 {
                     int error = 0;
@@ -589,7 +590,6 @@ void SubReactor::reactor(int reactorId)
                             // 主要实现的时候注意，outputFrame是局部变量
 
                             //-------以下也是测试，是为了搭配测试--------
-
                             auto responseFrame = m_dispatcher.dispatch(outputFrame);
                             std::string data = m_encoder.buildBufPacket(responseFrame.m_command, responseFrame.m_requestId, nlohmann::json::parse(responseFrame.m_body));
                             res = cli->handle_write(data);

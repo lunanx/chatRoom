@@ -15,6 +15,7 @@
 class ClientSession
 {
 public:
+
     /*
         构造函数
     */
@@ -31,7 +32,7 @@ public:
             1   暂时发送不出去
             2   全部发完了
     */
-    int handle_write(const std::string &data,int flags = MSG_NOSIGNAL);
+    int handle_write(const std::string &data, int flags = MSG_NOSIGNAL);
     /*
         从接收端读取字节流，可能会读取A的一部分+B的一部分，所以每次读取不应该清空。
         返回值  -1  接收错误
@@ -61,6 +62,16 @@ public:
     */
     bool hasWriteBufPending();
 
+    // 用于设置身份信息
+    void setAuthenticated(bool status);
+    void setUserId(int id);
+    void setUsername(const std::string &name);
+
+    // 查询身份信息
+    bool getAuthenticated();
+    int getUserId();
+    std::string getUsername();
+
 private:
     int m_cfd; // 客户端套接字
 
@@ -69,4 +80,9 @@ private:
     std::string m_recvBuf; // 接收端缓冲区数据
 
     struct sockaddr_in m_caddr; // 客户端地址信息
+
+    // 用于客户端的身份验证及保留身份信息,默认是没有进行登录验证
+    bool m_isAuthenticated{false};
+    int m_userId{-1};
+    std::string m_username{};
 };
