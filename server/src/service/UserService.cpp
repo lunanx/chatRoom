@@ -187,7 +187,7 @@ protocolHeader::CommandType UserService::loginUser(const std::string &body, std:
     printf("账户密码正确，登录成功\n");
     //登录成功设置id 和 username
     userId = infoResult.userId;
-    username = infoResult.username;
+    name = infoResult.username;
     return setResponse(responseBody, protocolHeader::CommandType::LOGIN_SUCCESS, "登录成功");
 }
 

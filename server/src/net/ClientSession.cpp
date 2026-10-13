@@ -123,32 +123,22 @@ bool ClientSession::hasWriteBufPending()
     return true;
 }
 
-void ClientSession::setAuthenticated(bool status)
+void ClientSession::loginAs(std::uint64_t userId, const std::string &username)
 {
-    m_isAuthenticated = status;
+    m_authenticatedUser = AuthenticatedUser{userId, username};
 }
 
-void ClientSession::setUserId(int id)
+void ClientSession::logout()
 {
-    m_userId = id;
+    m_authenticatedUser.reset();
 }
 
-void ClientSession::setUsername(const std::string &name)
+bool ClientSession::isAuthenticated() const
 {
-    m_username = name;
+    return m_authenticatedUser.has_value();
 }
 
-bool ClientSession::getAuthenticated()
+const std::optional<AuthenticatedUser> &ClientSession::getAuthenticatedUser() const
 {
-    return m_isAuthenticated;
-}
-
-int ClientSession::getUserId()
-{
-    return m_userId;
-}
-
-std::string ClientSession::getUsername()
-{
-    return m_username;
+    return m_authenticatedUser;
 }

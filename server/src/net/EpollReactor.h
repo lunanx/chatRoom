@@ -10,6 +10,7 @@
 #include <queue>
 #include <vector>
 #include <mutex>
+#include <memory>
 
 constexpr int subMAXCnt = 4;
 constexpr int subSessionMAXCnt = 64;
@@ -108,7 +109,7 @@ private:
 
     std::queue<ConInfo> m_queueConnFD; // 接收老爹的新连接
 
-    std::unordered_map<int, ClientSession *> m_cliSessionsMap; // 这里用哈希表可以快速查询到，也便于插入和删除
+    std::unordered_map<int, std::unique_ptr<ClientSession>> m_cliSessionsMap; // 这里用哈希表可以快速查询到，也便于插入和删除
 
     epoll_event m_evs[subSessionMAXCnt]; // 每个线程产生的文件描述符集合
 

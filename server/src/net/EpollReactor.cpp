@@ -255,10 +255,6 @@ SubReactor::~SubReactor()
         m_queueConnFD.pop();
     }
 
-    for (auto p : m_cliSessionsMap)
-    {
-        delete p.second;
-    }
     m_cliSessionsMap.clear();
 
     if (m_wakeFD != -1)
@@ -383,7 +379,6 @@ void SubReactor::removeEpollFD(int fd)
     {
         perror("epoll add error");
     }
-    delete m_cliSessionsMap[fd]; // ClientSession析构函数会close fd，不需要你再次close
     m_cliSessionsMap.erase(fd);
 }
 bool SubReactor::modifyEpollFD(int fd, uint32_t events)
@@ -461,11 +456,11 @@ void SubReactor::reactor(int reactorId)
                 while (cnt-- != 0)
                 {
                     std::unique_lock<std::mutex> lock(mux); // 获取锁资源
-                    
+
                     if (m_queueConnFD.empty())
                     {
-                        printf("wakeFD has count ,but connection queue may mismatch\n");\
-                        break;// 离开作用域自动释放
+                        printf("wakeFD has count ,but connection queue may mismatch\n");
+                        break; // 离开作用域自动释放
                     }
                     ConInfo newConInfo = m_queueConnFD.front();
                     m_queueConnFD.pop();
@@ -474,8 +469,11 @@ void SubReactor::reactor(int reactorId)
                     if (addToEpoll(newConInfo.m_fd))
                     {
                         // 创建session哈希表
-                        m_cliSessionsMap.insert({newConInfo.m_fd,
-                                                 new ClientSession(newConInfo.m_fd, newConInfo.m_cin)});
+                        m_cliSessionsMap.emplace(
+                            newConInfo.m_fd,
+                            std::make_unique<ClientSession>(
+                                newConInfo.m_fd,
+                                newConInfo.m_cin));
                     }
                     else
                     {
@@ -525,8 +523,7 @@ void SubReactor::reactor(int reactorId)
                     continue;
                 }
                 // 注意ClientSession里面封装了读写事件
-                auto cli = it->second;
-                m_dispatcher.setCliSession(*cli);
+                auto cli = it->second.get();
                 if (events & EPOLLERR)
                 {
                     int error = 0;
@@ -590,7 +587,7 @@ void SubReactor::reactor(int reactorId)
                             // 主要实现的时候注意，outputFrame是局部变量
 
                             //-------以下也是测试，是为了搭配测试--------
-                            auto responseFrame = m_dispatcher.dispatch(outputFrame);
+                            auto responseFrame = m_dispatcher.dispatch(outputFrame,*cli);
                             std::string data = m_encoder.buildBufPacket(responseFrame.m_command, responseFrame.m_requestId, nlohmann::json::parse(responseFrame.m_body));
                             res = cli->handle_write(data);
                             if (res == -1) // 有错误

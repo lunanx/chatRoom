@@ -15,7 +15,7 @@ struct PasswordHashQueryResult
 {
     UserQueryStatus status{UserQueryStatus::Error};
     std::string passwordHash;
-    int userId;
+    std::uint64_t userId;
     std::string username;
 };
 

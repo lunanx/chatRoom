@@ -31,7 +31,7 @@ namespace
     }
 }
 
-protocolHeader::PacketFrame Dispatcher::dispatch(const protocolHeader::PacketFrame &frame)
+protocolHeader::PacketFrame Dispatcher::dispatch(const protocolHeader::PacketFrame &frame, ClientSession &session)
 {
     const auto command = static_cast<protocolHeader::CommandType>(frame.m_command);
     auto responseCommand = protocolHeader::CommandType::UNKNOWN;
@@ -48,14 +48,18 @@ protocolHeader::PacketFrame Dispatcher::dispatch(const protocolHeader::PacketFra
             std::string username = {};
             responseCommand = UserService::loginUser(
                 frame.m_body, responseBody, userId, username);
-            if(responseCommand == protocolHeader::CommandType::LOGIN_SUCCESS)
+            if (responseCommand == protocolHeader::CommandType::LOGIN_SUCCESS)
             {
-
+                session.loginAs(static_cast<std::uint64_t>(userId), username);
             }
         }
         else if (command == protocolHeader::CommandType::LOGOUT_REQUEST)
         {
             responseCommand = UserService::logoutUser(frame.m_body, responseBody);
+            if (responseCommand == protocolHeader::CommandType::LOGOUT_SUCCESS)
+            {
+                session.logout();
+            }
         }
         else
         {
@@ -83,9 +87,4 @@ protocolHeader::PacketFrame Dispatcher::dispatch(const protocolHeader::PacketFra
         static_cast<std::uint16_t>(responseCommand),
         responseBody,
         frame.m_requestId);
-}
-
-void Dispatcher::setCliSession(const ClientSession &cli)
-{
-    m_cli = cli;
 }

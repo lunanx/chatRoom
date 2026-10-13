@@ -8,14 +8,8 @@ class Dispatcher
 public:
     Dispatcher() = default;
     /*
-        命令调度器
+        处理当前连接发出的请求
+        ClientSession由SubReactor所有,Dispatcher只借用它
     */
-    protocolHeader::PacketFrame dispatch(const protocolHeader::PacketFrame &frame);
-
-    /*
-        设置m_cli
-    */
-    void setCliSession(const ClientSession& cli);
-private:
-    ClientSession m_cli;
+    protocolHeader::PacketFrame dispatch(const protocolHeader::PacketFrame &frame,ClientSession& session);
 };

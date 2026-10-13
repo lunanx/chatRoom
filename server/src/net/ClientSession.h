@@ -6,16 +6,25 @@
 #include <sys/socket.h>
 #include <netinet/in.h>
 #include <arpa/inet.h>
+#include <cstdint>
+#include <optional>
+struct AuthenticatedUser
+{
+    std::uint64_t userId;
+    std::string username;
+};
+
 /*
     该类用于与客户端通信
 
     这里留了getter用于经过数据库后服务器向客户端回消息，具体实现后续再说，先进行初步的通信
 */
-
 class ClientSession
 {
 public:
-
+    // ClientSession 独占管理客户端 Socket，不允许复制。
+    ClientSession(const ClientSession &) = delete;
+    ClientSession &operator=(const ClientSession &) = delete;
     /*
         构造函数
     */
@@ -62,15 +71,13 @@ public:
     */
     bool hasWriteBufPending();
 
-    // 用于设置身份信息
-    void setAuthenticated(bool status);
-    void setUserId(int id);
-    void setUsername(const std::string &name);
-
-    // 查询身份信息
-    bool getAuthenticated();
-    int getUserId();
-    std::string getUsername();
+    /*
+        登录与退出登录相关函数
+    */
+    void loginAs(std::uint64_t userId, const std::string &username);
+    void logout();
+    bool isAuthenticated() const;
+    const std::optional<AuthenticatedUser> &getAuthenticatedUser() const;
 
 private:
     int m_cfd; // 客户端套接字
@@ -81,8 +88,9 @@ private:
 
     struct sockaddr_in m_caddr; // 客户端地址信息
 
-    // 用于客户端的身份验证及保留身份信息,默认是没有进行登录验证
-    bool m_isAuthenticated{false};
-    int m_userId{-1};
-    std::string m_username{};
+    /*
+        没有值：当前连接尚未登录。
+        有值：当前连接拥有已验证的用户身份。
+    */
+    std::optional<AuthenticatedUser> m_authenticatedUser;
 };
