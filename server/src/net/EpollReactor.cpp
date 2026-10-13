@@ -587,8 +587,9 @@ void SubReactor::reactor(int reactorId)
                             // 主要实现的时候注意，outputFrame是局部变量
 
                             //-------以下也是测试，是为了搭配测试--------
-                            auto responseFrame = m_dispatcher.dispatch(outputFrame,*cli);
-                            std::string data = m_encoder.buildBufPacket(responseFrame.m_command, responseFrame.m_requestId, nlohmann::json::parse(responseFrame.m_body));
+                            auto responseResult = m_dispatcher.dispatch(outputFrame,*cli);
+                            // 如果responseResult有Message，就要通过UDP发送
+                            std::string data = m_encoder.buildBufPacket(responseResult.frame.m_command, responseResult.frame.m_requestId, nlohmann::json::parse(responseResult.frame.m_body));
                             res = cli->handle_write(data);
                             if (res == -1) // 有错误
                             {

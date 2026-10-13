@@ -31,8 +31,9 @@ namespace
     }
 }
 
-protocolHeader::PacketFrame Dispatcher::dispatch(const protocolHeader::PacketFrame &frame, ClientSession &session)
+DispatchResult Dispatcher::dispatch(const protocolHeader::PacketFrame &frame, ClientSession &session)
 {
+    DispatchResult dispatchResult;
     const auto command = static_cast<protocolHeader::CommandType>(frame.m_command);
     auto responseCommand = protocolHeader::CommandType::UNKNOWN;
     std::string responseBody;
@@ -94,9 +95,13 @@ protocolHeader::PacketFrame Dispatcher::dispatch(const protocolHeader::PacketFra
             else
             {
                 std::optional<AuthenticatedUser> user = session.getAuthenticatedUser();
+                MessageSendResult messageSendResult = MessageService::sendContent(frame.m_body,responseBody,user->userId,user->username);
+                if(messageSendResult.command == protocolHeader::CommandType::MESSAGE_SEND_SUCCESS)
+                {
+                    dispatchResult.message = messageSendResult.message;
+                }
             }
         }
-
         else
         {
             // 未实现的命令也返回合法 JSON，避免客户端解析响应时遇到空白或非法内容。
@@ -118,9 +123,6 @@ protocolHeader::PacketFrame Dispatcher::dispatch(const protocolHeader::PacketFra
         responseCommand = failureCommandFor(command);
         responseBody = makeResponseBody(responseCommand, "服务器暂时无法处理请求，请稍后重试");
     }
-
-    return protocolHeader::PacketFrame(
-        static_cast<std::uint16_t>(responseCommand),
-        responseBody,
-        frame.m_requestId);
+    dispatchResult.frame = protocolHeader::PacketFrame(static_cast<std::uint16_t>(responseCommand),responseBody,frame.m_requestId);
+    return dispatchResult;
 }

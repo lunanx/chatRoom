@@ -6,6 +6,13 @@
 #include "model/Message.h"
 #include "db/DatabaseManager.h"
 #include <string>
+#include <optional>
+
+struct MessageSendResult
+{
+    protocolHeader::CommandType command;
+    std::optional<Message> message;
+};
 
 class MessageService
 {
@@ -13,7 +20,8 @@ public:
     /*
         发送消息业务
     */
-    static protocolHeader::CommandType sendContent(const std::string &body, std::string &responseBody,const std::uint64_t& userId,const std::string& username);
+    static MessageSendResult sendContent(const std::string &body, std::string &responseBody, const std::uint64_t &userId, const std::string &username);
+
 private:
     /*
         检查消息发送请求的JSON是否符合要求

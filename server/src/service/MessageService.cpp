@@ -33,7 +33,7 @@ namespace
     }
 }
 
-protocolHeader::CommandType MessageService::sendContent(const std::string &body, std::string &responseBody,const std::uint64_t& userId,const std::string& username)
+MessageSendResult MessageService::sendContent(const std::string &body, std::string &responseBody,const std::uint64_t& userId,const std::string& username)
 {
     /*
         TODO:
@@ -42,6 +42,8 @@ protocolHeader::CommandType MessageService::sendContent(const std::string &body,
         3 创建Message对象
         4 MessageRepository保存
         5 返回消息发送结果
+
+        这里的CommandType设置的语义可能有点问题-但先不着急改，之后在处理
     */
 
     nlohmann::json data;
@@ -49,7 +51,7 @@ protocolHeader::CommandType MessageService::sendContent(const std::string &body,
     if (!validateSendContentRequest(body, data))
     {
         printf("数据类型校验不通过,消息发送失败\n");
-        return setResponse(responseBody, protocolHeader::CommandType::MESSAGE_SEND_FAILED, "消息发送请求格式不正确");
+        return {setResponse(responseBody, protocolHeader::CommandType::MESSAGE_SEND_FAILED, "消息发送请求格式不正确")};
     }
 
     // 检查content
@@ -57,14 +59,20 @@ protocolHeader::CommandType MessageService::sendContent(const std::string &body,
     if (!isValidContent(content))
     {
         printf("消息内容校验不通过，消息发送失败\n");
-        return setResponse(responseBody, protocolHeader::CommandType::MESSAGE_SEND_FAILED, "消息格式不正确");
+        return {setResponse(responseBody, protocolHeader::CommandType::MESSAGE_SEND_FAILED, "消息格式不正确")};
     }
-    /* 
-        TODO:
-        1 将senderId,senderName,content创建成Message对象
-        2 保存至数据库，--其实也就是为了消息持久化，这个可以现不着急
-        3 返回发送情况，首先既要CommandType,又要返回广播时所需要的消息，那就返回值应该要换成结构体了
-    */
+    // 构造Message
+    Message message(userId,username,content);
+    //保存至数据库-----这里由于数据字段不够，还不实现
+    const CreateMessageResult createResult = MessageRepository::createMessage(message);
+    if(createResult == CreateMessageResult::Failed)
+    {
+        printf("数据库创建消息失败\n");
+        return {setResponse(responseBody, protocolHeader::CommandType::MESSAGE_SEND_FAILED, "服务器暂时无法处理消息创建请求，请稍后再试")};
+    }
+
+    printf("消息创建成功\n");
+    return {setResponse(responseBody, protocolHeader::CommandType::MESSAGE_SEND_SUCCESS, "消息创建成功"),message};
 }
 
 bool MessageService::validateSendContentRequest(const std::string &body, nlohmann::json &data)
@@ -96,5 +104,5 @@ bool MessageService::validateSendContentRequest(const std::string &body, nlohman
 
 bool MessageService::isValidContent(const std::string &content)
 {
-    return content.empty() || (utf8CharacterCount(content) <= 512 && content.size() <= 2048);
+    return !content.empty() && (utf8CharacterCount(content) <= 512 && content.size() <= 2048);
 }

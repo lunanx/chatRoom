@@ -74,7 +74,7 @@ public:
         3 将m_wakeFD加入epoll
         4 循环等待事件发生
             若是m_wakeFD事件发生，说明主线程产生了新连接
-                读取里面的计数，根据计数进行获取queue.front和删				 除.pop()，并将其加入到epoll和map里
+                读取里面的计数，根据计数进行获取queue.front和删除.pop()，并将其加入到epoll和map里
             若是客户端，则进行通信
     */
     void reactor(int reactorId);
