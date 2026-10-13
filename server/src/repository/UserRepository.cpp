@@ -68,7 +68,7 @@ CreateUserResult UserRepository::createUser(const User &user)
     return CreateUserResult::Failed;
 }
 
-PasswordHashQueryResult UserRepository::getUserInfoForLoginByUsername(const std::string &username)
+LoginResult UserRepository::getUserInfoForLoginByUsername(const std::string &username)
 {
     DatabaseManager dbManager;
     if (!dbManager.connect())
@@ -94,7 +94,7 @@ PasswordHashQueryResult UserRepository::getUserInfoForLoginByUsername(const std:
             return {UserQueryStatus::NotFound, {}, -1, {}};
         }
         const sql::SQLString hash = queryResult.result->getString("password_hash");
-        int id = queryResult.result->getInt("id");
+        std::uint64_t id = queryResult.result->getUInt64("id");
         const sql::SQLString name = queryResult.result->getString("username");
         return {UserQueryStatus::Found, std::string(hash.c_str(), hash.length()),id,std::string(name.c_str(),name.length())};
     }

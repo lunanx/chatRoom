@@ -19,13 +19,13 @@ public:
     /*
         登录业务
     */
-    static protocolHeader::CommandType loginUser(const std::string &body, std::string &responseBody, int &userId, std::string &name);
+    static protocolHeader::CommandType loginUser(const std::string &body, std::string &responseBody, std::uint64_t &userId, std::string &name);
 
     /*
         退出登录业务。当前最小版本要求客户端提交username/password进行重新验证;
         后续应改为使用ClientSession 中绑定的登录身份,避免依赖客户端重复提交身份。
     */
-    static protocolHeader::CommandType logoutUser(const std::string &body, std::string &responseBody);
+    static protocolHeader::CommandType logoutUser(const std::string& username, std::string &responseBody);
 
 private:
     /*

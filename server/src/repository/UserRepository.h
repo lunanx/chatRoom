@@ -11,7 +11,7 @@ enum class UserQueryStatus
     Error
 };
 
-struct PasswordHashQueryResult
+struct LoginResult
 {
     UserQueryStatus status{UserQueryStatus::Error};
     std::string passwordHash;
@@ -43,7 +43,7 @@ public:
         取得可登录账号的密码哈希。status != 1 的账号视为不可登录。
         成功则会返回userId,username,password_hash,失败则返回无效值
     */
-    static PasswordHashQueryResult getUserInfoForLoginByUsername(const std::string& username);
+    static LoginResult getUserInfoForLoginByUsername(const std::string& username);
     
     /*
         通过username修改用户online状态: 0表示离线，1表示在线。

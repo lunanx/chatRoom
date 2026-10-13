@@ -44,23 +44,55 @@ protocolHeader::PacketFrame Dispatcher::dispatch(const protocolHeader::PacketFra
         }
         else if (command == protocolHeader::CommandType::LOGIN_REQUEST)
         {
-            int userId = -1;
-            std::string username = {};
-            responseCommand = UserService::loginUser(
-                frame.m_body, responseBody, userId, username);
-            if (responseCommand == protocolHeader::CommandType::LOGIN_SUCCESS)
+            if (session.isAuthenticated())
             {
-                session.loginAs(static_cast<std::uint64_t>(userId), username);
+                responseCommand = protocolHeader::CommandType::LOGIN_FAILED;
+                responseBody = makeResponseBody(
+                    responseCommand,
+                    "当前已有账号登录，请先退出登录");
+            }
+            else
+            {
+                std::uint64_t userId = 0;
+                std::string username = {};
+                responseCommand = UserService::loginUser(
+                    frame.m_body, responseBody, userId, username);
+                if (responseCommand == protocolHeader::CommandType::LOGIN_SUCCESS)
+                {
+                    session.loginAs(static_cast<std::uint64_t>(userId), username);
+                }
             }
         }
         else if (command == protocolHeader::CommandType::LOGOUT_REQUEST)
         {
-            responseCommand = UserService::logoutUser(frame.m_body, responseBody);
-            if (responseCommand == protocolHeader::CommandType::LOGOUT_SUCCESS)
+            if (!session.isAuthenticated())
             {
-                session.logout();
+                responseCommand = protocolHeader::CommandType::LOGOUT_FAILED;
+                responseBody = makeResponseBody(
+                    responseCommand,
+                    "当前没有账号登录");
+            }
+            else
+            {
+                std::optional<AuthenticatedUser> user = session.getAuthenticatedUser();
+                responseCommand = UserService::logoutUser(user->username, responseBody);
+                if (responseCommand == protocolHeader::CommandType::LOGOUT_SUCCESS)
+                {
+                    session.logout();
+                }
             }
         }
+        else if (command == protocolHeader::CommandType::GROUP_MESSAGE_SEND)
+        {
+            if (!session.isAuthenticated())
+            {
+                responseCommand = protocolHeader::CommandType::LOGOUT_FAILED;
+                responseBody = makeResponseBody(
+                    responseCommand,
+                    "当前没有账号登录");
+            }
+        }
+
         else
         {
             // 未实现的命令也返回合法 JSON，避免客户端解析响应时遇到空白或非法内容。

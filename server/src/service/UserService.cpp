@@ -139,7 +139,7 @@ protocolHeader::CommandType UserService::registerUser(
     return setResponse(responseBody, protocolHeader::CommandType::REGISTER_SUCCESS, "注册成功");
 }
 
-protocolHeader::CommandType UserService::loginUser(const std::string &body, std::string &responseBody, int &userId, std::string &name)
+protocolHeader::CommandType UserService::loginUser(const std::string &body, std::string &responseBody, std::uint64_t &userId, std::string &name)
 {
     nlohmann::json data;
     // 校验JSON、username、password
@@ -164,7 +164,7 @@ protocolHeader::CommandType UserService::loginUser(const std::string &body, std:
     }
 
     // 区分“账号不可用”和“数据库查询失败”，避免把服务器故障误报为账号不存在。
-    const PasswordHashQueryResult infoResult = UserRepository::getUserInfoForLoginByUsername(username);
+    const LoginResult infoResult = UserRepository::getUserInfoForLoginByUsername(username);
     if (infoResult.status == UserQueryStatus::Error)
     {
         printf("查询密码哈希失败，登录暂时无法完成\n");
@@ -191,46 +191,10 @@ protocolHeader::CommandType UserService::loginUser(const std::string &body, std:
     return setResponse(responseBody, protocolHeader::CommandType::LOGIN_SUCCESS, "登录成功");
 }
 
-protocolHeader::CommandType UserService::logoutUser(const std::string &body, std::string &responseBody)
+protocolHeader::CommandType UserService::logoutUser(const std::string& username,std::string &responseBody)
 {
-    nlohmann::json data;
-    // 校验JSON、username、password
-    if (!validateLoginRequest(body, data))
-    {
-        printf("数据类型校验不通过,退出登录失败\n");
-        return setResponse(responseBody, protocolHeader::CommandType::LOGOUT_FAILED, "退出登录请求格式不正确");
-    }
-
-    // 检查username
-    std::string username = data[protocolHeader::USERNAME].get<std::string>();
-    if (!isValidUsername(username))
-    {
-        printf("用户名校验不通过,退出登录失败\n");
-        return setResponse(responseBody, protocolHeader::CommandType::LOGOUT_FAILED, "用户名或密码错误");
-    }
-    // 检查password
-    std::string password = data[protocolHeader::PASSWORD].get<std::string>();
-    if (!isValidPassword(password))
-    {
-        printf("密码校验不通过,退出登录失败\n");
-        return setResponse(responseBody, protocolHeader::CommandType::LOGOUT_FAILED, "用户名或密码错误");
-    }
-
     // 当前最小实现用账户密码验证退出请求。后续应将登录身份绑定到 ClientSession
     // 再由连接身份完成退出，而不是每次退出都信任客户端提供的username
-    const PasswordHashQueryResult hashResult = UserRepository::getUserInfoForLoginByUsername(username);
-    if (hashResult.status == UserQueryStatus::Error)
-    {
-        printf("查询密码哈希失败，退出登录暂时无法完成\n");
-        return setResponse(responseBody, protocolHeader::CommandType::LOGOUT_FAILED, "服务器暂时无法处理登录请求，请稍后重试");
-    }
-
-    if (hashResult.status == UserQueryStatus::NotFound ||
-        !PasswordHasher::verifyPassword(password, hashResult.passwordHash))
-    {
-        printf("账号验证失败，退出登录失败\n");
-        return setResponse(responseBody, protocolHeader::CommandType::LOGOUT_FAILED, "用户名或密码错误");
-    }
 
     if (!UserRepository::updateOnlineStatusByUsername(username, 0))
     {
