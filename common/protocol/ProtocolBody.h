@@ -2,8 +2,6 @@
 /*
     客户端与服务端公共 JSON 字段格式
     也就是body部分格式
-
-    先一注册功能为主，其他需要再添加
 */
 namespace protocolHeader
 {
@@ -29,4 +27,8 @@ namespace protocolHeader
 
     constexpr const char* DATA = "data"; // 发送的数据
 
+    /*
+        聊天消息
+    */
+    constexpr const char* CONTENT = "content";
 }

@@ -90,6 +90,12 @@ namespace protocolHeader
         */
         USER_JOIN = 14,
         USER_LEAVE = 15,
+
+        /*
+            消息发送状态
+        */
+        MESSAGE_SEND_FAILED = 16,
+        MESSAGE_SEND_SUCCESS = 17,
     };
 
     /*

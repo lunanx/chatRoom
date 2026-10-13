@@ -74,7 +74,7 @@ LoginResult UserRepository::getUserInfoForLoginByUsername(const std::string &use
     if (!dbManager.connect())
     {
         std::cerr << "数据库连接失败，无法查询" << username << "用户的密码哈希\n";
-        return {UserQueryStatus::Error, {}, -1, {}};
+        return {UserQueryStatus::Error, {}, static_cast<std::uint64_t>(-1), {}};
     }
 
     // 只允许正常账号登录。用户名不存在和账号不可用都不会返回密码哈希。
@@ -84,25 +84,25 @@ LoginResult UserRepository::getUserInfoForLoginByUsername(const std::string &use
 
     if (!queryResult.succeeded || !queryResult.result)
     {
-        return {UserQueryStatus::Error, {}, -1, {}};
+        return {UserQueryStatus::Error, {}, static_cast<std::uint64_t>(-1), {}};
     }
 
     try
     {
         if (!queryResult.result->next())
         {
-            return {UserQueryStatus::NotFound, {}, -1, {}};
+            return {UserQueryStatus::NotFound, {}, static_cast<std::uint64_t>(-1), {}};
         }
         const sql::SQLString hash = queryResult.result->getString("password_hash");
         std::uint64_t id = queryResult.result->getUInt64("id");
         const sql::SQLString name = queryResult.result->getString("username");
-        return {UserQueryStatus::Found, std::string(hash.c_str(), hash.length()),id,std::string(name.c_str(),name.length())};
+        return {UserQueryStatus::Found, std::string(hash.c_str(), hash.length()), id, std::string(name.c_str(), name.length())};
     }
     catch (sql::SQLException &e)
     {
         std::cerr << "查询用户密码哈希失败: " << e.what()
                   << "，错误代码: " << e.getErrorCode() << '\n';
-        return {UserQueryStatus::Error, {}, -1, {}};
+        return {UserQueryStatus::Error, {}, static_cast<std::uint64_t>(-1), {}};
     }
 }
 

@@ -91,6 +91,10 @@ protocolHeader::PacketFrame Dispatcher::dispatch(const protocolHeader::PacketFra
                     responseCommand,
                     "当前没有账号登录");
             }
+            else
+            {
+                std::optional<AuthenticatedUser> user = session.getAuthenticatedUser();
+            }
         }
 
         else
