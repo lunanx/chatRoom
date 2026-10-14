@@ -47,7 +47,7 @@ MessageSendResult MessageService::sendContent(const std::string &body, std::stri
     */
 
     nlohmann::json data;
-    // 校验JSON、content数据格式是否合格
+    // 校验JSON、content、conversationId数据格式是否合格
     if (!validateSendContentRequest(body, data))
     {
         printf("数据类型校验不通过,消息发送失败\n");
@@ -61,8 +61,16 @@ MessageSendResult MessageService::sendContent(const std::string &body, std::stri
         printf("消息内容校验不通过，消息发送失败\n");
         return {setResponse(responseBody, protocolHeader::CommandType::MESSAGE_SEND_FAILED, "消息格式不正确")};
     }
+    // 检查conversation_id--但感觉没啥好检查的--想想需要什么约束吗
+    std::uint64_t conversationId = data[protocolHeader::CONVERSATION_ID].get<std::uint64_t>();
+    if(!isValidConversationId(conversationId))
+    {
+        printf("会话id校验不通过,消息发送失败\n");
+        return {setResponse(responseBody, protocolHeader::CommandType::MESSAGE_SEND_FAILED, "会话id格式不正确")};
+    }
+
     // 构造Message
-    Message message(userId,username,content);
+    Message message(userId,username,content,conversationId);
     //保存至数据库-----这里由于数据字段不够，还不实现
     const CreateMessageResult createResult = MessageRepository::createMessage(message);
     if(createResult == CreateMessageResult::Failed)
@@ -99,10 +107,21 @@ bool MessageService::validateSendContentRequest(const std::string &body, nlohman
         return false;
     }
 
+    if(!data.contains(protocolHeader::CONVERSATION_ID) || !data[protocolHeader::CONVERSATION_ID].is_number_unsigned())
+    {
+        printf("conversation_id 不存在或者不是非负整数");
+        return false;
+    }
+
     return true;
 }
 
 bool MessageService::isValidContent(const std::string &content)
 {
     return !content.empty() && (utf8CharacterCount(content) <= 512 && content.size() <= 2048);
+}
+
+bool MessageService::isValidConversationId(const std::uint64_t &conversationId)
+{
+    return true;
 }

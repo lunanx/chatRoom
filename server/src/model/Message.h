@@ -12,13 +12,16 @@ public:
     Message(
         const std::uint64_t &senderId,
         const std::string &senderName,
-        const std::string &content);
+        const std::string &content,
+        const std::uint64_t &conversationId);
 
     const std::uint64_t& getSenderId() const;
     const std::string& getSenderName() const;
     const std::string& getContent() const;
+    const std::uint64_t& getConversationId() const;
 private:
     std::uint64_t m_senderId;  // 表示谁发的,这个可由登录验证后直接得到
     std::string m_senderName; // 广播显示的名字,这个可由登录验证后直接得到
     std::string m_content;     // 消息内容
+    std::uint64_t m_conversationId;// 表示消息所属的会话窗口
 };

@@ -7,10 +7,12 @@
 #include <thread>
 #include <sys/epoll.h>
 #include <unordered_map>
+#include <unordered_set>
 #include <queue>
 #include <vector>
 #include <mutex>
 #include <memory>
+#include <array>
 
 constexpr int subMAXCnt = 4;
 constexpr int subSessionMAXCnt = 64;
@@ -27,6 +29,13 @@ struct ConInfo
     }
     int m_fd;
     sockaddr_in m_cin;
+};
+
+// 一条待广播的消息
+struct BroadcastTask
+{
+    std::uint64_t conversationId;
+    std::string encodedFrame;
 };
 
 /*
@@ -48,10 +57,16 @@ public:
         唤醒 + 让主线程将新客户端添加至连接队列
     */
     bool addQueueConnFD(const ConInfo &info);
+
     /*
         给主线程一个获取唤醒文件描述符的API 在唤醒前，起码这个m_wakeFD初始化好了，也就是已经存在文件。
     */
     int getWakeFD(); // 给老爹一个获取你门铃的API
+
+    /*
+        提供给其他线程操作调用消息任务队列的入队接口
+    */
+    bool enqueueBroadcastTask(const BroadcastTask &task);
 
     /*
         给主线程一个发出停止信号的文件描述符的API 在发出信号之前，起码这个m_wakeFD初始化好了，也就是已经存在文件。
@@ -62,6 +77,13 @@ public:
         用于初始化，方便查看哪些创建失败
     */
     bool initSub();
+
+    /*
+        设置所有SubReactor的非拥有型指针列表
+        用于一个客户端给其他客户端发消息
+    */
+    bool setTargetReactors(const std::array<SubReactor*,subMAXCnt>& reactors);
+    
 
     /*
         如何处理如果不同线程之间的客户端若是一个群聊或私聊要如何通信 ----Q3
@@ -117,7 +139,20 @@ private:
 
     FrameEncoder m_encoder; // 装包器
 
-    Dispatcher m_dispatcher; //调度器
+    Dispatcher m_dispatcher; // 业务调度器
+
+    /*
+        聊天消息处理
+    */
+    int m_taksFD; // 用于唤醒当前线程处理消息任务
+
+    std::queue<BroadcastTask> m_broadcastQueue; // 当前线程的消息任务队列
+
+    std::mutex m_broadcastMutex; // 防止发送线程和接收线程同时操作队列,需要互斥锁，这里不能用全局mux,保证各个Reactor队列互不影响
+    
+    std::unordered_map<std::uint64_t,std::unordered_set<ClientSession>> m_conversationIdForSessionsMap; // 每个Subreactor中处于相同conversation_id的cli,这样加起来就是同一个聊天室了
+
+    std::array<SubReactor*,subMAXCnt> m_targetReactors{};//保存所有SubReactor的指针，包括自己,但只读
 };
 
 /*

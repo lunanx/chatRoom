@@ -96,7 +96,8 @@ DispatchResult Dispatcher::dispatch(const protocolHeader::PacketFrame &frame, Cl
             {
                 std::optional<AuthenticatedUser> user = session.getAuthenticatedUser();
                 MessageSendResult messageSendResult = MessageService::sendContent(frame.m_body,responseBody,user->userId,user->username);
-                if(messageSendResult.command == protocolHeader::CommandType::MESSAGE_SEND_SUCCESS)
+                responseCommand = messageSendResult.command;
+                if(responseCommand == protocolHeader::CommandType::MESSAGE_SEND_SUCCESS)
                 {
                     dispatchResult.message = messageSendResult.message;
                 }

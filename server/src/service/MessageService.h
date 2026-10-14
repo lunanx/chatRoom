@@ -39,4 +39,10 @@ private:
         大小是否<=2048;
     */
     static bool isValidContent(const std::string &content);
+
+    /*
+        检查conversation_id是否符合要求
+        检查内容:-- 不知道该检查啥，先直接返回true，想想需要添加什么约束
+    */
+    static bool isValidConversationId(const std::uint64_t &conversationId);
 };

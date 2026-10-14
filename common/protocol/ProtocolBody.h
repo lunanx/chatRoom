@@ -28,7 +28,9 @@ namespace protocolHeader
     constexpr const char* DATA = "data"; // 发送的数据
 
     /*
-        聊天消息
+        聊天消息所需类型
     */
     constexpr const char* CONTENT = "content";
+    constexpr const char* CONVERSATION_ID = "conversation_id";
+
 }

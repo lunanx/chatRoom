@@ -86,11 +86,18 @@ bool EpollReactor::initMEpoll(int sfd)
         }
     }
 
+    // 将所有Reactors给每个SubReactor
+    std::array<SubReactor *, subMAXCnt> allReactors{};
     for (int i = 0; i < subMAXCnt; i++)
     {
-        if (m_subReactors[i] == nullptr)
+        allReactors[i] = m_subReactors[i];
+    }
+
+    for (int i = 0; i < subMAXCnt; i++)
+    {
+        if (!m_subReactors[i]->setTargetReactors(allReactors))
         {
-            printf("m_subReactors new error!\n");
+            printf("setTargetReactors error!\n");
             return false;
         }
     }
@@ -237,7 +244,9 @@ SubReactor::SubReactor()
       m_stopSignalFD(-1),
       m_queueConnFD(),
       m_cliSessionsMap(),
-      m_evs{}
+      m_evs{},
+      m_taksFD(-1),
+      m_conversationIdForSessionsMap()
 {
 }
 
@@ -282,6 +291,13 @@ bool SubReactor::initSub()
         perror("m_stopSignalFD init error");
         return false;
     }
+
+    if ((m_taksFD = eventfd(0, EFD_NONBLOCK)) == -1) // 消息处理信号
+    {
+        perror("m_taksFD init error");
+        return false;
+    }
+
     if (addToEpoll(m_stopSignalFD) == false) // 将m_stopSignalFD文件描述符加入到epoll中
     {
         printf("m_stopSignalFD add to epoll error\n");
@@ -294,6 +310,21 @@ bool SubReactor::initSub()
     }
 
     return true;
+}
+
+bool SubReactor::setTargetReactors(const std::array<SubReactor *, subMAXCnt> &reactors)
+{
+    // 检查是否所有SubReactor都存在
+    for (SubReactor *reactor : reactors)
+    {
+        if (reactor == nullptr)
+        {
+            printf("setTargetReactors error: nullptr create\n");
+            return false;
+        }
+    }
+    // 复制指针数组,不复制SubReactor对象
+    m_targetReactors = reactors;
 }
 
 bool SubReactor::addQueueConnFD(const ConInfo &info)
@@ -324,6 +355,38 @@ bool SubReactor::addQueueConnFD(const ConInfo &info)
     m_queueConnFD.push(info);
 
     mux.unlock(); // 释放锁资源
+
+    return true;
+}
+
+bool SubReactor::enqueueBroadcastTask(const BroadcastTask &task)
+{
+    m_broadcastMutex.lock();
+    uint64_t cnt = 1;
+    ssize_t res;
+    do
+    {
+        res = write(m_taksFD, &cnt, sizeof(cnt));
+    } while (res == -1 && errno == EINTR);
+
+    if (res == -1)
+    {
+
+        perror("m_taksFD write error");
+        mux.unlock(); // 这里一定要释放锁资源，不然就会死锁了
+        return false;
+    }
+
+    if (res != sizeof(cnt))
+    {
+        printf("m_taksFD write size error\n");
+        mux.unlock(); // 这里一定要释放锁资源，不然就会死锁了
+        return false;
+    }
+
+    m_broadcastQueue.push(task);
+
+    m_broadcastMutex.unlock(); // 释放锁资源
 
     return true;
 }
@@ -514,6 +577,90 @@ void SubReactor::reactor(int reactorId)
 
                 return; // 直接return
             }
+            else if (newfd == m_taksFD)
+            {
+                // 读取计数器
+                uint64_t cnt = 0;
+                ssize_t res;
+                do
+                {
+                    res = read(newfd, &cnt, sizeof(cnt)); // 尝试消耗事件
+                } while (res == -1 && errno == EINTR);
+
+                // 还是有错误
+                if (res == -1)
+                {
+                    if (errno == EAGAIN || errno == EWOULDBLOCK)
+                    {
+                        // 当前没有待处理的eventfd计数
+                        continue;
+                    }
+
+                    // eventfd本身出现了异常
+                    perror("m_taksFD read error");
+                    return;
+                }
+                // res大小并不是要的计数
+                if (res != sizeof(cnt))
+                {
+                    printf("m_taksFD read size error\n");
+                    return;
+                }
+
+                while (!m_broadcastQueue.empty())
+                {
+                    m_broadcastMutex.lock(); // 获取锁资源
+
+                    auto newbroadcastQueue = m_broadcastQueue.front();
+                    m_broadcastQueue.pop();
+
+                    m_broadcastMutex.unlock(); // 释放锁资源 这里一定要手动释放
+
+                    std::uint64_t Cid = newbroadcastQueue.conversationId;
+                    auto cliSessions = m_conversationIdForSessionsMap.find(Cid);
+                    if (cliSessions == m_conversationIdForSessionsMap.end())
+                    {
+                        // 说明这个conversation_id 在当前线程并没有客户端加入了
+                        // 进行检查下一个conversation_id
+                        continue;
+                    }
+                    auto clientsSet = cliSessions->second;
+                    std::string sendFrame = newbroadcastQueue.encodedFrame;
+                    for (auto &p : clientsSet)
+                    {
+                        int res = const_cast<ClientSession &>(p).handle_write(sendFrame);
+                        if (res == -1) // 有错误
+                        {
+                            printf("handle_write error\n");
+                            removeEpollFD(newfd);
+                            continue; // 进行下一个cli
+                        }
+                        else if (res == 0) // 对端下线了，将fd从epoll中DEL
+                        {
+                            removeEpollFD(newfd);
+                            continue; // 进行下一个cli
+                        }
+                        else if (res == 1)
+                        {
+                            if (const_cast<ClientSession &>(p).hasWriteBufPending() == true)
+                            {
+                                modifyEpollFD(newfd, EPOLLIN | EPOLLRDHUP | EPOLLOUT);
+                            }
+                            // 这里发送不出去,由epoll重新判断EPOLLOUT
+                            continue; // 进行下一个cli
+                        }
+                        else if (res == 2)
+                        {
+                            // 虽然已经默认发送完了，但这里还是判断一下
+                            if (const_cast<ClientSession &>(p).hasWriteBufPending() == false)
+                            {
+                                modifyEpollFD(newfd, EPOLLIN | EPOLLRDHUP);
+                            }
+                            continue; // 进行下一个cli
+                        }
+                    }
+                }
+            }
             else
             {
                 // 如果不存在就下一个
@@ -587,8 +734,30 @@ void SubReactor::reactor(int reactorId)
                             // 主要实现的时候注意，outputFrame是局部变量
 
                             //-------以下也是测试，是为了搭配测试--------
-                            auto responseResult = m_dispatcher.dispatch(outputFrame,*cli);
+                            auto responseResult = m_dispatcher.dispatch(outputFrame, *cli);
                             // 如果responseResult有Message，就要通过UDP发送
+                            // 这里获得conversation_id，在唤醒其他线程
+                            // 以下发送给同一conversation_id的客户端
+                            // 规定是服务器主动推送，所以requestId为0
+                            if (responseResult.message.has_value())
+                            {
+                                BroadcastTask task;
+                                task.conversationId = responseResult.message->getConversationId();
+                                task.encodedFrame = m_encoder.buildBufPacket(
+                                    static_cast<std::uint16_t>(protocolHeader::CommandType::GROUP_MESSAGE_RECV),
+                                    0,
+                                    nlohmann::json::parse(responseResult.message->getContent()));
+                                // 给另外每个SubReactor投递消息队列
+                                // 依旧是唤醒+入队
+                                for (auto p : m_targetReactors)
+                                {
+                                    if (!p->enqueueBroadcastTask(task))
+                                    {
+                                        // 这里是要通知其他线程该stop了？
+                                    }
+                                }
+                            }
+                            // 以下服务器响应发送消息的客户端
                             std::string data = m_encoder.buildBufPacket(responseResult.frame.m_command, responseResult.frame.m_requestId, nlohmann::json::parse(responseResult.frame.m_body));
                             res = cli->handle_write(data);
                             if (res == -1) // 有错误
