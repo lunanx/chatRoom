@@ -72,12 +72,12 @@ MessageSendResult MessageService::sendContent(const std::string &body, std::stri
     // 构造Message
     Message message(userId,username,content,conversationId);
     //保存至数据库-----这里由于数据字段不够，还不实现
-    const CreateMessageResult createResult = MessageRepository::createMessage(message);
-    if(createResult == CreateMessageResult::Failed)
-    {
-        printf("数据库创建消息失败\n");
-        return {setResponse(responseBody, protocolHeader::CommandType::MESSAGE_SEND_FAILED, "服务器暂时无法处理消息创建请求，请稍后再试")};
-    }
+    // const CreateMessageResult createResult = MessageRepository::createMessage(message);
+    // if(createResult == CreateMessageResult::Failed)
+    // {
+    //     printf("数据库创建消息失败\n");
+    //     return {setResponse(responseBody, protocolHeader::CommandType::MESSAGE_SEND_FAILED, "服务器暂时无法处理消息创建请求，请稍后再试")};
+    // }
 
     printf("消息创建成功\n");
     return {setResponse(responseBody, protocolHeader::CommandType::MESSAGE_SEND_SUCCESS, "消息创建成功"),message};

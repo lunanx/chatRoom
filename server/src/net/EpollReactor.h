@@ -144,13 +144,13 @@ private:
     /*
         聊天消息处理
     */
-    int m_taksFD; // 用于唤醒当前线程处理消息任务
+    int m_taskFD; // 用于唤醒当前线程处理消息任务
 
     std::queue<BroadcastTask> m_broadcastQueue; // 当前线程的消息任务队列
 
     std::mutex m_broadcastMutex; // 防止发送线程和接收线程同时操作队列,需要互斥锁，这里不能用全局mux,保证各个Reactor队列互不影响
     
-    std::unordered_map<std::uint64_t,std::unordered_set<ClientSession>> m_conversationIdForSessionsMap; // 每个Subreactor中处于相同conversation_id的cli,这样加起来就是同一个聊天室了
+    std::unordered_map<std::uint64_t,std::unordered_set<int>> m_conversationIdForSessionsMap; // 每个Subreactor中处于相同conversation_id的cli,这样加起来就是同一个聊天室了
 
     std::array<SubReactor*,subMAXCnt> m_targetReactors{};//保存所有SubReactor的指针，包括自己,但只读
 };
