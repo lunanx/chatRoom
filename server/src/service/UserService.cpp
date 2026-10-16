@@ -4,10 +4,11 @@
 #include <regex>
 
 /*
-注册成功目前响应格式统一为
+目前响应格式统一为
+例:
 {
-  "code": 8,
-  "message": "注册成功"
+  "code": 
+  "message": 
 }
 */
 namespace
@@ -102,7 +103,7 @@ protocolHeader::CommandType UserService::registerUser(
     }
 
     // 检查用户名是否存在
-    const UserQueryStatus usernameStatus = UserRepository::findByUsername(username);
+    const UserQueryStatus usernameStatus = UserRepository::findUsername(username);
     if (usernameStatus == UserQueryStatus::Found)
     {
         printf("用户名已存在,注册失败\n");

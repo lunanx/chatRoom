@@ -32,7 +32,7 @@ public:
     /*
         查询用户名是否存在。数据库错误与“不存在”使用不同结果表示。
     */
-    static UserQueryStatus findByUsername(const std::string& username);
+    static UserQueryStatus findUsername(const std::string& username);
 
     /*
         创建用户。并发注册发生唯一键冲突时，返回 UsernameExists。
@@ -48,5 +48,5 @@ public:
     /*
         通过username修改用户online状态: 0表示离线，1表示在线。
     */
-    static bool updateOnlineStatusByUsername(const std::string& username,int status);
+    static bool updateOnlineStatusByUsername(const std::string& username,const int& status);
 };

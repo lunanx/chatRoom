@@ -1,5 +1,14 @@
 #include "service/MessageService.h"
 
+
+/*
+目前响应格式统一为
+例:
+{
+  "code": 
+  "message": 
+}
+*/
 namespace
 {
     // JSON 解析器会检查 UTF-8；因此统计非 UTF-8 延续字节的数量即可得到 Unicode 码点数。
@@ -41,7 +50,7 @@ MessageSendResult MessageService::sendContent(const std::string &body, std::stri
         2 校验content
         3 创建Message对象
         4 MessageRepository保存
-        5 返回消息发送结果
+        5 返回消息发送结构体
 
         这里的CommandType设置的语义可能有点问题-但先不着急改，之后在处理
     */
@@ -113,6 +122,11 @@ bool MessageService::validateSendContentRequest(const std::string &body, nlohman
         return false;
     }
 
+    if(!data.contains(protocolHeader::LAST_SEQ) || !data[protocolHeader::LAST_SEQ].is_number_unsigned())
+    {
+        printf("last_seq 不存在或者不是非负整数");
+        return false;
+    }
     return true;
 }
 

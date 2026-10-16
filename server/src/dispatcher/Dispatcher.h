@@ -3,6 +3,7 @@
 #include "protocol/ProtocolHeader.h"
 #include "service/UserService.h"
 #include "service/MessageService.h"
+#include "service/ConversationService.h"
 #include "net/ClientSession.h"
 #include <optional>
 
@@ -10,6 +11,7 @@ struct DispatchResult
 {
     protocolHeader::PacketFrame frame;
     std::optional<Message> message; // 不需要广播时就为空
+    std::optional<std::uint64_t> conversationId;// 当会话创建成功时需要给客户端返回
 };
 /*
     业务调度器

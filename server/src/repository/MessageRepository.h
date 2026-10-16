@@ -12,8 +12,6 @@ enum class CreateMessageResult
 
 class MessageRepository
 {
-private:
-    /* data */
 public:
     /*
         创建消息

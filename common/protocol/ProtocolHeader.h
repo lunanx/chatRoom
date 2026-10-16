@@ -96,6 +96,22 @@ namespace protocolHeader
         */
         MESSAGE_SEND_FAILED = 16,
         MESSAGE_SEND_SUCCESS = 17,
+
+        /*
+            创建会话通用
+        */
+        CHATCREATE_REQUEST = 18,
+        /*
+            群聊
+        */
+        GROUPCREATE_SUCCESS = 19,
+        GROUPCREATE_FAILED = 20,
+
+        /*
+            私聊
+        */
+        PRIVATECREATE_SUCCESS = 21,
+        PRIVATECREATE_FAILED = 22,
     };
 
     /*

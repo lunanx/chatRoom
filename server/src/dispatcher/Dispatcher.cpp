@@ -103,6 +103,15 @@ DispatchResult Dispatcher::dispatch(const protocolHeader::PacketFrame &frame, Cl
                 }
             }
         }
+        else if (command  == protocolHeader::CommandType::CHATCREATE_REQUEST)
+        {
+            ConversationCreateResult conversationCreateResult = ConversationService::createConversation(frame.m_body,responseBody);
+            responseCommand = conversationCreateResult.command;
+            if(responseCommand == protocolHeader::CommandType::GROUPCREATE_SUCCESS || responseCommand == protocolHeader::CommandType::PRIVATECREATE_SUCCESS)
+            {
+                dispatchResult.conversationId = conversationCreateResult.conversationId;
+            }
+        }
         else
         {
             // 未实现的命令也返回合法 JSON，避免客户端解析响应时遇到空白或非法内容。

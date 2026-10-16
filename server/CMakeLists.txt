@@ -37,6 +37,8 @@ add_executable(InternetChatRoomServer
 
     src/model/User.cpp
     src/model/User.h
+    src/model/Conversation.cpp
+    src/model/Conversation.h
 
     src/service/UserService.cpp
     src/service/UserService.h
@@ -44,12 +46,15 @@ add_executable(InternetChatRoomServer
     src/service/FriendService.h
     src/service/MessageService.cpp
     src/service/MessageService.h
-    src/service/common.h
+    src/service/ConversationService.cpp
+    src/service/ConversationService.h
 
     src/repository/UserRepository.cpp
     src/repository/UserRepository.h
     src/repository/MessageRepository.cpp
     src/repository/MessageRepository.h
+    src/repository/ConversationRepository.cpp
+    src/repository/ConversationRepository.h
 
     src/protocol/FrameDecoder.cpp
     src/protocol/FrameDecoder.h

@@ -246,7 +246,7 @@ SubReactor::SubReactor()
       m_cliSessionsMap(),
       m_evs{},
       m_taskFD(-1),
-      m_conversationIdForSessionsMap()
+      m_sessionFdsByConversationId()
 {
 }
 
@@ -628,9 +628,9 @@ void SubReactor::reactor(int reactorId)
 
                     m_broadcastMutex.unlock(); // 释放锁资源 这里一定要手动释放
 
-                    std::uint64_t Cid = newbroadcastQueue.conversationId;
-                    auto cliSessions = m_conversationIdForSessionsMap.find(Cid);
-                    if (cliSessions == m_conversationIdForSessionsMap.end())
+                    std::uint64_t conversationId = newbroadcastQueue.conversationId;
+                    auto cliSessions = m_sessionFdsByConversationId.find(conversationId);
+                    if (cliSessions == m_sessionFdsByConversationId.end())
                     {
                         // 说明这个conversation_id 在当前线程并没有客户端加入了
                         // 进行检查下一个conversation_id
@@ -754,6 +754,7 @@ void SubReactor::reactor(int reactorId)
 
                             //-------以下也是测试，是为了搭配测试--------
                             auto responseResult = m_dispatcher.dispatch(outputFrame, *cli);
+                            nlohmann::json responseBody = nlohmann::json::parse(responseResult.frame.m_body);
                             // 如果responseResult有Message，就要通过UDP发送
                             // 这里获得conversation_id，在唤醒其他线程
                             // 以下发送给同一conversation_id的客户端
@@ -761,11 +762,11 @@ void SubReactor::reactor(int reactorId)
                             if (responseResult.message.has_value())
                             {
                                 BroadcastTask task;
-                                nlohmann::json body = 
-                                {
-                                    {"content",responseResult.message->getContent()}
-                                };
-                                task.conversationId = responseResult.message->getConversationId();
+                                nlohmann::json body =
+                                    {
+                                        {"content", responseResult.message.value().getContent()}
+                                    };
+                                task.conversationId = responseResult.message.value().getConversationId();
                                 task.encodedFrame = m_encoder.buildBufPacket(
                                     static_cast<std::uint16_t>(protocolHeader::CommandType::GROUP_MESSAGE_RECV),
                                     0,
@@ -782,8 +783,13 @@ void SubReactor::reactor(int reactorId)
                                     printf("投递线程成功\n");
                                 }
                             }
+                            // 如果conversation_id有值发给客户端的消息要加上"conversation_id"
+                            if (responseResult.conversationId.has_value())
+                            {
+                                responseBody[protocolHeader::CONVERSATION_ID] = responseResult.conversationId.value();
+                            }
                             // 以下服务器响应发送消息的客户端
-                            std::string data = m_encoder.buildBufPacket(responseResult.frame.m_command, responseResult.frame.m_requestId, nlohmann::json::parse(responseResult.frame.m_body));
+                            std::string data = m_encoder.buildBufPacket(responseResult.frame.m_command, responseResult.frame.m_requestId,responseBody);
                             res = cli->handle_write(data);
                             if (res == -1) // 有错误
                             {

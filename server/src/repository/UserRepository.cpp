@@ -9,7 +9,7 @@ namespace
     constexpr int DUPLICATE_ENTRY_ERROR = 1062;
 }
 
-UserQueryStatus UserRepository::findByUsername(const std::string &username)
+UserQueryStatus UserRepository::findUsername(const std::string &username)
 {
     DatabaseManager dbManager;
     if (!dbManager.connect())
@@ -93,9 +93,9 @@ LoginResult UserRepository::getUserInfoForLoginByUsername(const std::string &use
         {
             return {UserQueryStatus::NotFound, {}, static_cast<std::uint64_t>(-1), {}};
         }
-        const sql::SQLString hash = queryResult.result->getString("password_hash");
-        std::uint64_t id = queryResult.result->getUInt64("id");
-        const sql::SQLString name = queryResult.result->getString("username");
+        const sql::SQLString hash = queryResult.result->getString(protocolHeader::PASSWORD_HASH);
+        std::uint64_t id = queryResult.result->getUInt64(protocolHeader::ID);
+        const sql::SQLString name = queryResult.result->getString(protocolHeader::USERNAME);
         return {UserQueryStatus::Found, std::string(hash.c_str(), hash.length()), id, std::string(name.c_str(), name.length())};
     }
     catch (sql::SQLException &e)
@@ -106,7 +106,7 @@ LoginResult UserRepository::getUserInfoForLoginByUsername(const std::string &use
     }
 }
 
-bool UserRepository::updateOnlineStatusByUsername(const std::string &username, int status)
+bool UserRepository::updateOnlineStatusByUsername(const std::string &username, const int& status)
 {
     if (status != 0 && status != 1)
     {
