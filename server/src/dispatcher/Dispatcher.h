@@ -12,6 +12,7 @@ struct DispatchResult
     protocolHeader::PacketFrame frame;
     std::optional<Message> message; // 不需要广播时就为空
     std::optional<std::uint64_t> conversationId;// 当会话创建成功时需要给客户端返回
+    std::optional<std::uint64_t> lastSeq; // 对应数据库中的 Conversation.last_seq
 };
 /*
     业务调度器

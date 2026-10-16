@@ -112,6 +112,7 @@ namespace protocolHeader
         */
         PRIVATECREATE_SUCCESS = 21,
         PRIVATECREATE_FAILED = 22,
+        
     };
 
     /*

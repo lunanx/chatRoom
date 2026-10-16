@@ -4,6 +4,9 @@
 #include <string.h>
 #include <unistd.h>
 #include <fcntl.h>
+#include <cerrno>
+#include <iostream>
+#include <utility>
 
 std::mutex mux;
 //------------------------EpollReactor----------------------
@@ -368,7 +371,9 @@ bool SubReactor::addQueueConnFD(const ConInfo &info)
 
 bool SubReactor::enqueueBroadcastTask(const BroadcastTask &task)
 {
-    m_broadcastMutex.lock();
+    // 先拿队列锁。目标线程即使立即从 eventfd 醒来，也会在取队列时等待此锁。
+    std::lock_guard<std::mutex> lock(m_broadcastMutex); // 离开作用域自动释放
+
     uint64_t cnt = 1;
     ssize_t res;
     do
@@ -378,23 +383,20 @@ bool SubReactor::enqueueBroadcastTask(const BroadcastTask &task)
 
     if (res == -1)
     {
-
         perror("m_taskFD write error");
-        m_broadcastMutex.unlock(); // 这里一定要释放锁资源，不然就会死锁了
         return false;
     }
 
-    if (res != sizeof(cnt))
+    if (res != static_cast<ssize_t>(sizeof(cnt)) &&
+        !(res == -1 && (errno == EAGAIN || errno == EWOULDBLOCK)))
     {
-        printf("m_taskFD write size error\n");
-        m_broadcastMutex.unlock(); // 这里一定要释放锁资源，不然就会死锁了
+        std::cerr << "m_taskFD 写入长度异常\n";
         return false;
     }
 
+    // EAGAIN 表示 eventfd 计数器已经达到可写上限，通常说明已有唤醒通知待处理；
+    // 任务仍然入队，消费者醒来后会把整个队列排空。
     m_broadcastQueue.push(task);
-
-    m_broadcastMutex.unlock(); // 释放锁资源
-
     return true;
 }
 
@@ -451,6 +453,43 @@ void SubReactor::removeEpollFD(int fd)
     }
     m_cliSessionsMap.erase(fd);
 }
+
+void SubReactor::trackSessionConversation(int fd, std::uint64_t conversationId)
+{
+    if (m_cliSessionsMap.find(fd) == m_cliSessionsMap.end() || conversationId == 0)
+    {
+        return;
+    }
+    m_sessionFdsByConversationId[conversationId].insert(fd);
+    m_conversationsBySessionFd[fd].insert(conversationId);
+}
+
+void SubReactor::clearSessionConversations(int fd)
+{
+    auto reverseIt = m_conversationsBySessionFd.find(fd);
+    if (reverseIt == m_conversationsBySessionFd.end())
+    {
+        return;
+    }
+    // 遍历当前客户端连接fd所在的所有会话id
+    // 通过这个会话id,m_sessionFdsByConversationId将里面的fd删除
+    for (const std::uint64_t conversationId : reverseIt->second)
+    {
+        auto membersIt = m_sessionFdsByConversationId.find(conversationId);
+        if (membersIt == m_sessionFdsByConversationId.end())
+        {
+            continue;
+        }
+        // 删除断开连接的fd
+        membersIt->second.erase(fd);
+        if (membersIt->second.empty())
+        {
+            m_sessionFdsByConversationId.erase(membersIt);
+        }
+    }
+    m_conversationsBySessionFd.erase(reverseIt);
+}
+
 bool SubReactor::modifyEpollFD(int fd, uint32_t events)
 {
     // 不存在，不需要修改,算修改失败
@@ -616,17 +655,16 @@ void SubReactor::reactor(int reactorId)
 
                 while (1)
                 {
-                    m_broadcastMutex.lock(); // 获取锁资源
-
-                    if (m_broadcastQueue.empty())
+                    BroadcastTask newbroadcastQueue;
                     {
-                        m_broadcastMutex.lock(); // 退出循环也是需要释放锁资源
-                        break;
+                        std::lock_guard<std::mutex> lock(m_broadcastMutex);
+                        if (m_broadcastQueue.empty())
+                        {
+                            break;
+                        }
+                        newbroadcastQueue = std::move(m_broadcastQueue.front());
+                        m_broadcastQueue.pop();
                     }
-                    auto newbroadcastQueue = m_broadcastQueue.front();
-                    m_broadcastQueue.pop();
-
-                    m_broadcastMutex.unlock(); // 释放锁资源 这里一定要手动释放
 
                     std::uint64_t conversationId = newbroadcastQueue.conversationId;
                     auto cliSessions = m_sessionFdsByConversationId.find(conversationId);
@@ -636,6 +674,8 @@ void SubReactor::reactor(int reactorId)
                         // 进行检查下一个conversation_id
                         continue;
                     }
+                    // 复制fd列表，
+                    // 之后发送失败时 removeEpollFD 会修改索引集合。
                     auto clientFDSet = cliSessions->second;
                     std::string sendFrame = newbroadcastQueue.encodedFrame;
                     for (int fd : clientFDSet)
@@ -647,6 +687,10 @@ void SubReactor::reactor(int reactorId)
                             continue;
                         }
                         auto cli = tmp->second.get();
+                        if (!cli->isAuthenticated())
+                        {
+                            continue;
+                        }
                         int res = cli->handle_write(sendFrame);
                         if (res == -1) // 有错误
                         {
@@ -755,41 +799,62 @@ void SubReactor::reactor(int reactorId)
                             //-------以下也是测试，是为了搭配测试--------
                             auto responseResult = m_dispatcher.dispatch(outputFrame, *cli);
                             nlohmann::json responseBody = nlohmann::json::parse(responseResult.frame.m_body);
-                            // 如果responseResult有Message，就要通过UDP发送
-                            // 这里获得conversation_id，在唤醒其他线程
-                            // 以下发送给同一conversation_id的客户端
+                            // 如果 responseResult 中有新保存的 Message，就通过跨 SubReactor 任务队列进行 TCP 投递。
+                            // 每个目标线程只查找和操作自己管理的 ClientSession。
                             // 规定是服务器主动推送，所以requestId为0
                             if (responseResult.message.has_value())
                             {
+                                // 会话id ，添加到当前客户端的双向索引表
+                                const Message &message = responseResult.message.value();
+                                trackSessionConversation(newfd, message.getConversationId());
+                                // 封装发送给对应会话的客户端的数据包，并唤醒其他相关线程
                                 BroadcastTask task;
-                                nlohmann::json body =
-                                    {
-                                        {"content", responseResult.message.value().getContent()}
-                                    };
-                                task.conversationId = responseResult.message.value().getConversationId();
+                                nlohmann::json body = {
+                                    {protocolBody::CONVERSATION_ID, message.getConversationId()},
+                                    {protocolBody::CLIENT_MSG_ID, message.getClientMsgId()},
+                                    {protocolBody::SERVER_MSG_ID, message.getServerMsgId()},
+                                    {protocolBody::SEQ, message.getSeq()},
+                                    {protocolBody::LAST_SEQ, message.getSeq()},
+                                    {protocolBody::USER_ID, message.getSenderId()},
+                                    {protocolBody::USERNAME, message.getSenderName()},
+                                    {protocolBody::TYPE, message.getType()},
+                                    {protocolBody::CONTENT, message.getContent()}};
+                                task.conversationId = message.getConversationId();
+                                const auto pushCommand = message.getConversationType() == 1
+                                                             ? protocolHeader::CommandType::PRIVATE_MESSAGE_RECV
+                                                             : protocolHeader::CommandType::GROUP_MESSAGE_RECV;
                                 task.encodedFrame = m_encoder.buildBufPacket(
-                                    static_cast<std::uint16_t>(protocolHeader::CommandType::GROUP_MESSAGE_RECV),
-                                    0,
-                                    body);
+                                    static_cast<std::uint16_t>(pushCommand), 0, body);
                                 // 给另外每个SubReactor投递消息队列
                                 // 依旧是唤醒+入队
-                                for (auto p : m_targetReactors)
+                                // 投递失败不是线程停止信号；记录错误后继续尝试其他 Reactor。
+                                for (SubReactor *target : m_targetReactors)
                                 {
-                                    if (!p->enqueueBroadcastTask(task))
+                                    if (target == nullptr || !target->enqueueBroadcastTask(task))
                                     {
-                                        printf("某个线程消息投递失败\n");
-                                        continue;
+                                        std::cerr << "广播任务投递失败，目标 Reactor 暂未接收任务\n";
                                     }
                                     printf("投递线程成功\n");
                                 }
                             }
-                            // 如果conversation_id有值发给客户端的消息要加上"conversation_id"
+
+                            // 客户端创建/获取会话成功后，记录该连接在此会话中的本地订阅关系。
                             if (responseResult.conversationId.has_value())
                             {
-                                responseBody[protocolHeader::CONVERSATION_ID] = responseResult.conversationId.value();
+                                trackSessionConversation(newfd, responseResult.conversationId.value());
+                                responseBody[protocolBody::CONVERSATION_ID] = responseResult.conversationId.value();
+                            }
+                            if (responseResult.lastSeq.has_value())
+                            {
+                                responseBody[protocolBody::LAST_SEQ] = responseResult.lastSeq.value();
+                            }
+                            // 成功退出登录后，不再向该链接推送会话消息
+                            if (responseResult.frame.m_command == static_cast<std::uint16_t>(protocolHeader::CommandType::LOGOUT_SUCCESS))
+                            {
+                                clearSessionConversations(newfd);
                             }
                             // 以下服务器响应发送消息的客户端
-                            std::string data = m_encoder.buildBufPacket(responseResult.frame.m_command, responseResult.frame.m_requestId,responseBody);
+                            std::string data = m_encoder.buildBufPacket(responseResult.frame.m_command, responseResult.frame.m_requestId, responseBody);
                             res = cli->handle_write(data);
                             if (res == -1) // 有错误
                             {

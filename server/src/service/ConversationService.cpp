@@ -1,29 +1,21 @@
 #include "ConversationService.h"
+#include "protocol/ProtocolBody.h"
+#include "repository/UserRepository.h"
+#include <algorithm>
+#include <iostream>
 
-/*
-目前响应格式统一为
-例:
-{
-  "code":
-  "message":
-}
-*/
 namespace
 {
-    // JSON 解析器会检查 UTF-8；因此统计非 UTF-8 延续字节的数量即可得到 Unicode 码点数。
-    // 这比直接使用 std::string::size() 更接近普通用户理解的“字符数”。
-    std::size_t utf8CharacterCount(const std::string &value)
+
+    protocolHeader::CommandType commandForType(std::uint64_t type, bool success)
     {
-        std::size_t count = 0;
-        for (unsigned char ch : value)
+        if (type == 1)
         {
-            // 多字节的非首个字节的前两位都是 10
-            if ((ch & 0xC0) != 0x80)
-            {
-                ++count;
-            }
+            return success ? protocolHeader::CommandType::PRIVATECREATE_SUCCESS
+                           : protocolHeader::CommandType::PRIVATECREATE_FAILED;
         }
-        return count;
+        return success ? protocolHeader::CommandType::GROUPCREATE_SUCCESS
+                       : protocolHeader::CommandType::GROUPCREATE_FAILED;
     }
 
     // 统一生成服务器响应Body;以后替换响应格式只需要集中修改这里
@@ -33,24 +25,37 @@ namespace
         const std::string &message)
     {
         const nlohmann::json response = {
-            {protocolHeader::CODE, static_cast<std::uint16_t>(command)},
-            {protocolHeader::MESSAGE, message}};
+            {protocolBody::CODE, static_cast<std::uint16_t>(command)},
+            {protocolBody::MESSAGE, message}};
 
         responseBody = response.dump();
         return command;
     }
+
+    bool isUnsignedInteger(const nlohmann::json &value)
+    {
+        if (value.is_number_unsigned())
+        {
+            return true;
+        }
+        return value.is_number_integer() && value.get<std::int64_t>() >= 0;
+    }
+
+    ConversationCreateResult fail(
+        std::string &responseBody,
+        std::uint64_t type,
+        const std::string &message)
+    {
+        return {setResponse(responseBody, commandForType(type, false), message), std::nullopt, std::nullopt};
+    }
 }
 
-ConversationCreateResult ConversationService::createConversation(const std::string &body, std::string &responseBody)
+ConversationCreateResult ConversationService::createConversation(
+    const std::string &body,
+    std::string &responseBody,
+    const std::uint64_t &authenticatedUserId)
 {
-    /*
-       TODO:
-       1 校验JSON合不合法
-       2 校验type,user_id_1,user_id_1
-       3 创建Conversation对象
-       4 ConversationRepository保存
-       5 返回会话创建结构体
-   */
+
     nlohmann::json data;
     ConversationCreateRequestResult res = validateConversationCreateRequest(body, data);
     if (res == ConversationCreateRequestResult::RequestError)
@@ -59,91 +64,125 @@ ConversationCreateResult ConversationService::createConversation(const std::stri
         return {setResponse(responseBody, protocolHeader::CommandType::PRIVATECREATE_FAILED, "会话创建请求格式不正确")};
     }
 
-    if (res == ConversationCreateRequestResult::IsPrivateConversation)
+    std::uint64_t type = data[protocolBody::TYPE].get<std::uint64_t>();
+    Conversation conversation = [&]() -> Conversation
     {
-        // 检查type是否为 1
-        std::uint64_t type = data[protocolHeader::TYPE].get<std::uint64_t>();
-        if (!isValidType(type, 1))
+        if (type == 1)
         {
-            printf("会话类型校验不通过，会话创建失败\n");
-            return {setResponse(responseBody, protocolHeader::CommandType::PRIVATECREATE_FAILED, "会话格式不正确")};
+            std::uint64_t userId1 = data[protocolBody::USER_ID_1].get<std::uint64_t>();
+            std::uint64_t userId2 = data[protocolBody::USER_ID_2].get<std::uint64_t>();
+            // 私聊双方排序，确保同一对用户不会产生 A-B 与 B-A 两条会话。
+            if (userId1 > userId2)
+            {
+                std::swap(userId1, userId2);
+            }
+            return Conversation(static_cast<std::uint16_t>(type), userId1, userId2);
         }
-        // 检查两个用户id
-        std::uint64_t userId1 = data[protocolHeader::USER_ID_1].get<std::uint64_t>();
-        std::uint64_t userId2 = data[protocolHeader::USER_ID_2].get<std::uint64_t>();
-        if (!(isValidUserId(userId1) && isValidUserId(userId2)))
+        return Conversation(static_cast<std::uint16_t>(type), data[protocolBody::GROUP_ID].get<std::uint64_t>());
+    }();
+    /*
+        私聊验证:
+        服务端验证当前登录用户确实是两个参与者之一，并检查两名用户的账号状态。
+        然后将用户 ID 排序，保证相同的两个人不会产生 A-B 和 B-A 两条不同的私聊记录
+    */
+    if (type == 1)
+    {
+        const auto userId1 = conversation.getUserId1().value();
+        const auto userId2 = conversation.getUserId2().value();
+        if (userId1 == 0 || userId2 == 0 || userId1 == userId2)
         {
-            printf("用户id校验不通过,会话创建失败\n");
-            return {setResponse(responseBody, protocolHeader::CommandType::PRIVATECREATE_FAILED, "用户或群组id格式不正确")};
+            return fail(responseBody, type, "私聊用户 ID 不合法");
         }
-
-        // 构造Conversation
-        Conversation conversation(type, userId1, userId2);
-        // 保存至数据库
-        if (ConversationRepository::createPrivateConversation(conversation) == CreateConversationResult::Failed)
+        if (authenticatedUserId != userId1 && authenticatedUserId != userId2)
         {
-            printf("数据库创建会话失败\n");
-            return {setResponse(responseBody, protocolHeader::CommandType::PRIVATECREATE_FAILED, "服务器暂时无法处理会话创建请求，请稍后再试")};
+            return fail(responseBody, type, "当前登录用户必须是私聊参与者");
         }
-
-        getConversationIdResult result = ConversationRepository::getConversationIdByConversationObject(conversation);
-        if (result.status == ConversationQueryStatus::Error)
+        const auto firstUserStatus = UserRepository::checkActiveUserId(userId1);
+        const auto secondUserStatus = UserRepository::checkActiveUserId(userId2);
+        if (firstUserStatus == UserQueryStatus::Error || secondUserStatus == UserQueryStatus::Error)
         {
-            printf("创建会话成功,但数据库层有错误\n");
-            return {setResponse(responseBody, protocolHeader::CommandType::PRIVATECREATE_FAILED, "服务器暂时无法处理会话创建请求，请稍后再试")};
+            return fail(responseBody, type, "服务器暂时无法验证私聊用户，请稍后重试");
         }
-        else if (result.status == ConversationQueryStatus::NotFound)
+        if (firstUserStatus != UserQueryStatus::Found || secondUserStatus != UserQueryStatus::Found)
         {
-            printf("创建会话成功，但查询conversation_id失败\n");
-            return {setResponse(responseBody, protocolHeader::CommandType::PRIVATECREATE_FAILED, "服务器暂时无法处理会话创建请求，请稍后再试")};
+            return fail(responseBody, type, "私聊参与者不存在或账号不可用");
         }
-        conversation.setId(result.conversationId);
-
-        printf("创建会话与查询conversation_id都成功\n");
-        return {setResponse(responseBody, protocolHeader::CommandType::PRIVATECREATE_SUCCESS, "创建会话成功"), conversation.getId()};
     }
+    /*
+        群聊验证:
+        检查群组状态和当前用户的成员身份，避免仅凭客户端传来的 group_id 就创建或获取会话。
+    */
     else
     {
-        // 检查type是否为 2
-        std::uint64_t type = data[protocolHeader::TYPE].get<std::uint64_t>();
-        if (!isValidType(type, 2))
+        const std::uint64_t groupId = conversation.getGroupId().value();
+        if (groupId == 0)
         {
-            printf("会话类型校验不通过，会话创建失败\n");
-            return {setResponse(responseBody, protocolHeader::CommandType::GROUPCREATE_FAILED, "会话格式不正确")};
+            return fail(responseBody, type, "群组 ID 不合法");
         }
-        // 检查群组id
-        std::uint64_t groupId = data[protocolHeader::GROUP_ID].get<std::uint64_t>();
-        if (!isValidGroupId(groupId))
+        const auto membershipStatus = ConversationRepository::checkActiveGroupMember(groupId, authenticatedUserId);
+        if (membershipStatus == ConversationQueryStatus::Error)
         {
-            printf("群组id校验不通过,会话创建失败\n");
-            return {setResponse(responseBody, protocolHeader::CommandType::GROUPCREATE_FAILED, "用户或群组id格式不正确")};
+            return fail(responseBody, type, "服务器暂时无法验证群组成员，请稍后重试");
         }
-
-        // 构造Conversation
-        Conversation conversation(type,groupId);
-        // 保存至数据库
-        if (ConversationRepository::createGroupConversation(conversation) == CreateConversationResult::Failed)
+        if (membershipStatus != ConversationQueryStatus::Found)
         {
-            printf("数据库创建会话失败\n");
-            return {setResponse(responseBody, protocolHeader::CommandType::GROUPCREATE_FAILED, "服务器暂时无法处理会话创建请求，请稍后再试")};
+            return fail(responseBody, type, "群组不存在、已禁用或当前用户不是群成员");
         }
-
-        getConversationIdResult result = ConversationRepository::getConversationIdByConversationObject(conversation);
-        if (result.status == ConversationQueryStatus::Error)
-        {
-            printf("创建会话成功,但数据库层有错误\n");
-            return {setResponse(responseBody, protocolHeader::CommandType::GROUPCREATE_FAILED, "服务器暂时无法处理会话创建请求，请稍后再试")};
-        }
-        else if (result.status == ConversationQueryStatus::NotFound)
-        {
-            printf("创建会话成功，但查询conversation_id失败\n");
-            return {setResponse(responseBody, protocolHeader::CommandType::GROUPCREATE_FAILED, "服务器暂时无法处理会话创建请求，请稍后再试")};
-        }
-        conversation.setId(result.conversationId);
-
-        printf("创建会话与查询conversation_id都成功\n");
-        return {setResponse(responseBody, protocolHeader::CommandType::GROUPCREATE_SUCCESS, "创建会话成功"), conversation.getId()};
     }
+
+    // 先查询已有会话
+    // 如果不存在才能新创建
+    // 如果重复打开私聊/群聊时,返回原有 conversation_id。
+    auto idResult = ConversationRepository::getConversationIdByConversationObject(conversation);
+    if (idResult.status == ConversationQueryStatus::Error)
+    {
+        return fail(responseBody, type, "服务器暂时无法查询会话，请稍后重试");
+    }
+    // NotFound，说明没有conversation_id
+    if (idResult.status == ConversationQueryStatus::NotFound)
+    {
+        const auto createResult = type == 1
+                                      ? ConversationRepository::createPrivateConversation(conversation)
+                                      : ConversationRepository::createGroupConversation(conversation);
+
+        if (createResult == CreateConversationResult::Created)
+        {
+            // 创建成功了，要获取conversation_id。
+            idResult = ConversationRepository::getConversationIdByConversationObject(conversation);
+        }
+        else
+        {
+            // 另一请求可能在我们的查询之后先创建了同一会话；
+            // 再次查找可兼容此并发情况。
+            idResult = ConversationRepository::getConversationIdByConversationObject(conversation);
+        }
+    }
+
+    if (idResult.status != ConversationQueryStatus::Found)
+    {
+        return fail(responseBody, type, "服务器暂时无法创建或获取会话，请稍后重试");
+    }
+
+    // 以上步骤是如果已经存在会话就返回原会话id,不存在就创建新会话id
+
+    // 以下步骤就是返回旧或新的会话信息
+    // 获取当前数据库真实的last_seq
+    const auto lastSeqResult = ConversationRepository::getLastSeqByConversationId(idResult.conversationId);
+    if (lastSeqResult.status != ConversationQueryStatus::Found)
+    {
+        return fail(responseBody, type, "会话已获取，但读取消息序号失败，请稍后重试");
+    }
+    // 获取当前的会话id
+    conversation.setId(idResult.conversationId);
+    const auto responseCommand = commandForType(type, true);
+    nlohmann::json response = {
+        {protocolBody::CODE, static_cast<std::uint16_t>(responseCommand)},
+        {protocolBody::MESSAGE, "获取会话成功"},
+        {protocolBody::CONVERSATION_ID, idResult.conversationId},
+        {protocolBody::LAST_SEQ, lastSeqResult.lastSeq}};
+    responseBody = response.dump();
+
+    return {responseCommand, idResult.conversationId, lastSeqResult.lastSeq};
 }
 
 ConversationCreateRequestResult ConversationService::validateConversationCreateRequest(const std::string &body, nlohmann::json &data)
@@ -164,42 +203,34 @@ ConversationCreateRequestResult ConversationService::validateConversationCreateR
         return ConversationCreateRequestResult::RequestError;
     }
 
-    if (!data.contains(protocolHeader::TYPE) || !data[protocolHeader::TYPE].is_number_unsigned())
+    if (!data.contains(protocolBody::TYPE) ||
+        !isUnsignedInteger(data[protocolBody::TYPE]))
     {
-        printf("content 不存在或者不是非负整数\n");
+        printf("type类型不正确\n");
         return ConversationCreateRequestResult::RequestError;
     }
 
-    if // 用户1和用户2要同时存在
-        ((data.contains(protocolHeader::USER_ID_1) && data[protocolHeader::USER_ID_1].is_number_unsigned()) &&
-         (data.contains(protocolHeader::USER_ID_2) && data[protocolHeader::USER_ID_2].is_number_unsigned()))
+    const auto type = data[protocolBody::TYPE].get<std::uint64_t>();
+    if (type == 1)
     {
-        printf("该会话是私聊,Reques格式正确\n");
+        if (!data.contains(protocolBody::USER_ID_1) || !isUnsignedInteger(data[protocolBody::USER_ID_1]) ||
+            !data.contains(protocolBody::USER_ID_2) || !isUnsignedInteger(data[protocolBody::USER_ID_2]))
+        {
+            printf("是私聊，但不存在两个用户名或类型不正确\n");
+            return ConversationCreateRequestResult::RequestError;
+        }
         return ConversationCreateRequestResult::IsPrivateConversation;
     }
-    else // 不是私聊，看看是不是群聊
+
+    if (type == 2)
     {
-        if (data.contains(protocolHeader::GROUP_ID) && data[protocolHeader::GROUP_ID].is_number_unsigned())
+        if (!data.contains(protocolBody::GROUP_ID) || !isUnsignedInteger(data[protocolBody::GROUP_ID]))
         {
-            printf("该会话是群聊,Reques格式正确\n");
-            return ConversationCreateRequestResult::IsGroupConversation;
+            printf("是群聊聊，但不存在群组id或类型不正确\n");
+            return ConversationCreateRequestResult::RequestError;
         }
-        printf("不存在userId1和userId2 或者 groupId或者字段不是非负整数\n");
-        return ConversationCreateRequestResult::RequestError;
+        return ConversationCreateRequestResult::IsGroupConversation;
     }
-}
 
-bool ConversationService::isValidType(const std::uint64_t &type, std::uint64_t check)
-{
-    return type == check;
-}
-
-bool ConversationService::isValidUserId(const std::uint64_t &userId)
-{
-    return true;
-}
-
-bool ConversationService::isValidGroupId(const std::uint64_t &groupId)
-{
-    return true;
+    return ConversationCreateRequestResult::RequestError;
 }

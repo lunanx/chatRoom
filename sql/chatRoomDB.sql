@@ -525,10 +525,7 @@ CREATE TABLE IF NOT EXISTS `Conversation`
 CREATE TABLE IF NOT EXISTS `Message`
 (
     `id` BIGINT UNSIGNED NOT NULL AUTO_INCREMENT
-        COMMENT '消息数据库内部主键',
-
-    `server_msg_id` BIGINT UNSIGNED NOT NULL
-        COMMENT '服务端生成的全局唯一消息ID',
+        COMMENT '数据库生成的消息唯一ID，同时作为协议中的 server_msg_id',
 
     `client_msg_id` VARCHAR(64) NOT NULL
         COMMENT '客户端生成的幂等ID，重试时必须保持不变',
@@ -567,9 +564,6 @@ CREATE TABLE IF NOT EXISTS `Message`
         COMMENT '消息更新时间',
 
     PRIMARY KEY (`id`),
-
-    UNIQUE KEY `uk_Message_server_msg_id`
-        (`server_msg_id`),
 
     UNIQUE KEY `uk_Message_sender_client_msg`
         (`sender_id`, `client_msg_id`),

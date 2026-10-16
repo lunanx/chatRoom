@@ -2,8 +2,7 @@
 
 #include "db/DatabaseManager.h"
 #include "model/Conversation.h"
-#include <string>
-
+#include <cstdint>
 
 enum class ConversationQueryStatus
 {
@@ -15,13 +14,13 @@ enum class ConversationQueryStatus
 struct getLastSeqResult
 {
     ConversationQueryStatus status{ConversationQueryStatus::Error};
-    std::uint64_t lastId;
+    std::uint64_t lastSeq{0};
 };
 
 struct getConversationIdResult
 {
     ConversationQueryStatus status{ConversationQueryStatus::Error};
-    std::uint64_t conversationId;
+    std::uint64_t conversationId{0};
 };
 
 enum class CreateConversationResult
@@ -36,26 +35,25 @@ public:
     /*
         创建私聊
     */
-    static CreateConversationResult createPrivateConversation(const Conversation& conversation);
+    static CreateConversationResult createPrivateConversation(const Conversation &conversation);
 
     /*
         创建群聊
     */
-    static CreateConversationResult createGroupConversation(const Conversation& conversation);
+    static CreateConversationResult createGroupConversation(const Conversation &conversation);
 
     /*
-        通过会话conversation_id更新last_seq
+        获取会话内最后一条已提交消息的序号。
     */
-    static bool updateLastSeqByConversationId(const std::uint64_t& conversation_id,const std::uint64_t& seq);
+    static getLastSeqResult getLastSeqByConversationId(std::uint64_t conversationId);
 
     /*
-        通过会话conversation_id查询得到last_seq
+        根据私聊双方 ID 或群组 ID 查找已有 Conversation。
     */
-    static getLastSeqResult getLastSeqByConversationId(const std::uint64_t& conversation_id,const std::uint64_t& seq);
-    
+    static getConversationIdResult getConversationIdByConversationObject(const Conversation &conversation);
+
     /*
-        通过其他字段查询得到conversation.id
+        仅当群组存在且状态正常，并且当前用户在 GroupMember 中时返回 Found。
     */
-    static getConversationIdResult getConversationIdByConversationObject(const Conversation& conversation);
+    static ConversationQueryStatus checkActiveGroupMember(std::uint64_t groupId, std::uint64_t userId);
 };
-

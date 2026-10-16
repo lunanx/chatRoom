@@ -82,8 +82,7 @@ public:
         设置所有SubReactor的非拥有型指针列表
         用于一个客户端给其他客户端发消息
     */
-    bool setTargetReactors(const std::array<SubReactor*,subMAXCnt>& reactors);
-    
+    bool setTargetReactors(const std::array<SubReactor *, subMAXCnt> &reactors);
 
     /*
         如何处理如果不同线程之间的客户端若是一个群聊或私聊要如何通信 ----Q3
@@ -123,6 +122,11 @@ private:
     */
     bool modifyEpollFD(int fd, uint32_t events);
 
+    // 记录当前 TCP 连接已经打开/使用的会话；索引只由所属 SubReactor 线程修改。
+    void trackSessionConversation(int fd, std::uint64_t conversationId);
+    // 某个TCP断开连接后将其所在的会话id删除
+    void clearSessionConversations(int fd);
+
     int m_wakeFD; // 用于老爹唤醒
 
     int m_epfd; // 每个线程独自的epoll套接字
@@ -149,10 +153,12 @@ private:
     std::queue<BroadcastTask> m_broadcastQueue; // 当前线程的消息任务队列
 
     std::mutex m_broadcastMutex; // 防止发送线程和接收线程同时操作队列,需要互斥锁，这里不能用全局mux,保证各个Reactor队列互不影响
-    
-    std::unordered_map<std::uint64_t,std::unordered_set<int>> m_sessionFdsByConversationId; // 每个Subreactor中处于相同conversation_id的cli,这样加起来就是同一个聊天室了
 
-    std::array<SubReactor*,subMAXCnt> m_targetReactors{};//保存所有SubReactor的指针，包括自己,但只读
+    //双向索引
+    std::unordered_map<std::uint64_t, std::unordered_set<int>> m_sessionFdsByConversationId; // 每个Subreactor中处于相同conversation_id的cli,这样加起来就是同一个聊天室了
+    std::unordered_map<int, std::unordered_set<std::uint64_t>> m_conversationsBySessionFd; // fd -> 该连接已打开的会话，断线时用于反向清理
+    
+    std::array<SubReactor *, subMAXCnt> m_targetReactors{}; // 保存所有SubReactor的指针，包括自己,但只读
 };
 
 /*

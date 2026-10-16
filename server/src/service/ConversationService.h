@@ -4,12 +4,15 @@
 #include "repository/ConversationRepository.h"
 #include "model/Conversation.h"
 #include "db/DatabaseManager.h"
+#include <cstdint>
+#include <optional>
 #include <string>
 
 struct ConversationCreateResult
 {
-    protocolHeader::CommandType command;
+    protocolHeader::CommandType command{protocolHeader::CommandType::UNKNOWN};
     std::optional<std::uint64_t> conversationId;
+    std::optional<std::uint64_t> lastSeq;
 };
 
 enum ConversationCreateRequestResult
@@ -24,8 +27,13 @@ class ConversationService
 public:
     /*
         创建会话业务
+        存在就返回已有会话，不存在就创建新会话
+        authenticatedUserId 必须来自 ClientSession，不能由客户端声明。
     */
-    static ConversationCreateResult createConversation(const std::string &body, std::string &responseBody);
+    static ConversationCreateResult createConversation(
+        const std::string &body,
+        std::string &responseBody,
+        const std::uint64_t &authenticatedUserId);
 
 private:
     /*
@@ -39,27 +47,8 @@ private:
 
         返回值:
         command,
-        Conversation类，但Conversation类的last_seq不存在
+        Conversation类，
+        last_seq
     */
     static ConversationCreateRequestResult validateConversationCreateRequest(const std::string &body, nlohmann::json &data);
-
-    /*
-        检查type是否符合要求
-        检查内容:
-        要么是1,要么是2;
-    */
-    static bool isValidType(const std::uint64_t &type, std::uint64_t check);
-    /*
-        检查userId是否符合要求
-        检查内容:
-        当前不知检查什么，默认直接返回true;
-    */
-    static bool isValidUserId(const std::uint64_t &userId);
-
-    /*
-        检查groupId是否符合要求
-        检查内容:
-        当前不知检查什么，默认直接返回true;
-    */
-    static bool isValidGroupId(const std::uint64_t &groupId);
 };

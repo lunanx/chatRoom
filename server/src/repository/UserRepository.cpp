@@ -1,4 +1,5 @@
 #include "UserRepository.h"
+#include "protocol/ProtocolBody.h"
 #include <iostream>
 
 namespace
@@ -33,6 +34,33 @@ UserQueryStatus UserRepository::findUsername(const std::string &username)
     {
         std::cerr << "查询用户名失败: " << e.what()
                   << "，错误代码: " << e.getErrorCode() << '\n';
+        return UserQueryStatus::Error;
+    }
+}
+
+UserQueryStatus UserRepository::checkActiveUserId(std::uint64_t userId)
+{
+    DatabaseManager dbManager;
+    if (!dbManager.connect())
+    {
+        std::cerr << "数据库连接失败，无法检查用户 ID\n";
+        return UserQueryStatus::Error;
+    }
+
+    auto queryResult = dbManager.query(
+        "SELECT 1 FROM User WHERE id = ? AND status = 1 LIMIT 1", userId);
+    if (!queryResult.succeeded || !queryResult.result)
+    {
+        return UserQueryStatus::Error;
+    }
+
+    try
+    {
+        return queryResult.result->next() ? UserQueryStatus::Found : UserQueryStatus::NotFound;
+    }
+    catch (const std::exception &e)
+    {
+        std::cerr << "检查用户 ID 失败: " << e.what() << '\n';
         return UserQueryStatus::Error;
     }
 }
@@ -93,9 +121,9 @@ LoginResult UserRepository::getUserInfoForLoginByUsername(const std::string &use
         {
             return {UserQueryStatus::NotFound, {}, static_cast<std::uint64_t>(-1), {}};
         }
-        const sql::SQLString hash = queryResult.result->getString(protocolHeader::PASSWORD_HASH);
-        std::uint64_t id = queryResult.result->getUInt64(protocolHeader::ID);
-        const sql::SQLString name = queryResult.result->getString(protocolHeader::USERNAME);
+        const sql::SQLString hash = queryResult.result->getString(protocolBody::PASSWORD_HASH);
+        std::uint64_t id = queryResult.result->getUInt64(protocolBody::ID);
+        const sql::SQLString name = queryResult.result->getString(protocolBody::USERNAME);
         return {UserQueryStatus::Found, std::string(hash.c_str(), hash.length()), id, std::string(name.c_str(), name.length())};
     }
     catch (sql::SQLException &e)
@@ -106,7 +134,7 @@ LoginResult UserRepository::getUserInfoForLoginByUsername(const std::string &use
     }
 }
 
-bool UserRepository::updateOnlineStatusByUsername(const std::string &username, const int& status)
+bool UserRepository::updateOnlineStatusByUsername(const std::string &username, const int &status)
 {
     if (status != 0 && status != 1)
     {

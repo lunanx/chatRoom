@@ -16,19 +16,40 @@ namespace
             return protocolHeader::CommandType::LOGIN_FAILED;
         case protocolHeader::CommandType::LOGOUT_REQUEST:
             return protocolHeader::CommandType::LOGOUT_FAILED;
+        case protocolHeader::CommandType::GROUP_MESSAGE_SEND:
+        case protocolHeader::CommandType::PRIVATE_MESSAGE_SEND:
+            return protocolHeader::CommandType::MESSAGE_SEND_FAILED;
         default:
             return protocolHeader::CommandType::UNKNOWN;
         }
     }
-
     std::string makeResponseBody(protocolHeader::CommandType command, const std::string &message)
     {
         const nlohmann::json response =
             {
-                {protocolHeader::CODE, static_cast<std::uint16_t>(command)},
-                {protocolHeader::MESSAGE, message}};
+                {protocolBody::CODE, static_cast<std::uint16_t>(command)},
+                {protocolBody::MESSAGE, message}};
         return response.dump();
     }
+
+    protocolHeader::CommandType unauthenticatedConversationFailure(const std::string &body)
+    {
+        try
+        {
+            const auto data = nlohmann::json::parse(body);
+            if (data.is_object() && data.contains(protocolBody::TYPE) &&
+                data[protocolBody::TYPE].is_number_integer() &&
+                data[protocolBody::TYPE].get<std::int64_t>() == 2)
+            {
+                return protocolHeader::CommandType::GROUPCREATE_FAILED;
+            }
+        }
+        catch (...)
+        {
+        }
+        return protocolHeader::CommandType::PRIVATECREATE_FAILED;
+    }
+
 }
 
 DispatchResult Dispatcher::dispatch(const protocolHeader::PacketFrame &frame, ClientSession &session)
@@ -83,33 +104,41 @@ DispatchResult Dispatcher::dispatch(const protocolHeader::PacketFrame &frame, Cl
                 }
             }
         }
-        else if (command == protocolHeader::CommandType::GROUP_MESSAGE_SEND)
+        else if (command == protocolHeader::CommandType::GROUP_MESSAGE_SEND ||
+                 command == protocolHeader::CommandType::PRIVATE_MESSAGE_SEND)
         {
             if (!session.isAuthenticated())
             {
-                responseCommand = protocolHeader::CommandType::LOGOUT_FAILED;
-                responseBody = makeResponseBody(
-                    responseCommand,
-                    "当前没有账号登录");
+                responseCommand = protocolHeader::CommandType::MESSAGE_SEND_FAILED;
+                responseBody = makeResponseBody(responseCommand, "当前没有账号登录");
             }
             else
             {
-                std::optional<AuthenticatedUser> user = session.getAuthenticatedUser();
-                MessageSendResult messageSendResult = MessageService::sendContent(frame.m_body,responseBody,user->userId,user->username);
-                responseCommand = messageSendResult.command;
-                if(responseCommand == protocolHeader::CommandType::MESSAGE_SEND_SUCCESS)
+                const auto &user = session.getAuthenticatedUser();
+                const MessageSendResult result = MessageService::sendContent(
+                    frame.m_body, responseBody, user->userId, user->username);
+                responseCommand = result.command;
+                if (result.shouldBroadcast && result.message.has_value())
                 {
-                    dispatchResult.message = messageSendResult.message;
+                    dispatchResult.message = result.message;
                 }
             }
         }
-        else if (command  == protocolHeader::CommandType::CHATCREATE_REQUEST)
+        else if (command == protocolHeader::CommandType::CHATCREATE_REQUEST)
         {
-            ConversationCreateResult conversationCreateResult = ConversationService::createConversation(frame.m_body,responseBody);
-            responseCommand = conversationCreateResult.command;
-            if(responseCommand == protocolHeader::CommandType::GROUPCREATE_SUCCESS || responseCommand == protocolHeader::CommandType::PRIVATECREATE_SUCCESS)
+            if (!session.isAuthenticated())
             {
-                dispatchResult.conversationId = conversationCreateResult.conversationId;
+                responseCommand = unauthenticatedConversationFailure(frame.m_body);
+                responseBody = makeResponseBody(responseCommand, "当前没有账号登录");
+            }
+            else
+            {
+                const auto &user = session.getAuthenticatedUser();
+                const ConversationCreateResult result = ConversationService::createConversation(
+                    frame.m_body, responseBody, user->userId);
+                responseCommand = result.command;
+                dispatchResult.conversationId = result.conversationId;
+                dispatchResult.lastSeq = result.lastSeq;
             }
         }
         else
@@ -133,6 +162,7 @@ DispatchResult Dispatcher::dispatch(const protocolHeader::PacketFrame &frame, Cl
         responseCommand = failureCommandFor(command);
         responseBody = makeResponseBody(responseCommand, "服务器暂时无法处理请求，请稍后重试");
     }
-    dispatchResult.frame = protocolHeader::PacketFrame(static_cast<std::uint16_t>(responseCommand),responseBody,frame.m_requestId);
+    
+    dispatchResult.frame = protocolHeader::PacketFrame(static_cast<std::uint16_t>(responseCommand), responseBody, frame.m_requestId);
     return dispatchResult;
 }

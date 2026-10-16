@@ -3,7 +3,7 @@
     客户端与服务端公共 JSON 字段格式
     也就是body部分格式
 */
-namespace protocolHeader
+namespace protocolBody
 {
     /*
         通用id字段
@@ -40,7 +40,9 @@ namespace protocolHeader
     */
     constexpr const char* CONTENT = "content";
     constexpr const char* CONVERSATION_ID = "conversation_id";
-
+    constexpr const char* CLIENT_MSG_ID = "client_msg_id";
+    constexpr const char* SERVER_MSG_ID = "server_msg_id";
+    constexpr const char* SEQ = "seq";
     /*
         创建会话相关
     */

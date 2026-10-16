@@ -1,12 +1,14 @@
 #include "service/MessageService.h"
 
+#include <cstdint>
+#include <iostream>
 
 /*
 目前响应格式统一为
 例:
 {
-  "code": 
-  "message": 
+  "code":
+  "message":
 }
 */
 namespace
@@ -27,6 +29,15 @@ namespace
         return count;
     }
 
+    bool isUnsignedInteger(const nlohmann::json &value)
+    {
+        if (value.is_number_unsigned())
+        {
+            return true;
+        }
+        return value.is_number_integer() && value.get<std::int64_t>() >= 0;
+    }
+
     // 统一生成服务器响应Body;以后替换响应格式只需要集中修改这里
     protocolHeader::CommandType setResponse(
         std::string &responseBody,
@@ -34,62 +45,115 @@ namespace
         const std::string &message)
     {
         const nlohmann::json response = {
-            {protocolHeader::CODE, static_cast<std::uint16_t>(command)},
-            {protocolHeader::MESSAGE, message}};
+            {protocolBody::CODE, static_cast<std::uint16_t>(command)},
+            {protocolBody::MESSAGE, message}};
 
         responseBody = response.dump();
         return command;
     }
+
+    MessageSendResult failed(std::string &responseBody, const std::string &message)
+    {
+        return {setResponse(responseBody, protocolHeader::CommandType::MESSAGE_SEND_FAILED, message),
+                std::nullopt, false};
+    }
+
 }
 
-MessageSendResult MessageService::sendContent(const std::string &body, std::string &responseBody,const std::uint64_t& userId,const std::string& username)
+MessageSendResult MessageService::sendContent(
+    const std::string &body,
+    std::string &responseBody,
+    const std::uint64_t &userId,
+    const std::string &username)
 {
-    /*
-        TODO:
-        1 校验JSON合不合法
-        2 校验content
-        3 创建Message对象
-        4 MessageRepository保存
-        5 返回消息发送结构体
-
-        这里的CommandType设置的语义可能有点问题-但先不着急改，之后在处理
-    */
 
     nlohmann::json data;
     // 校验JSON、content、conversationId数据格式是否合格
     if (!validateSendContentRequest(body, data))
     {
         printf("数据类型校验不通过,消息发送失败\n");
-        return {setResponse(responseBody, protocolHeader::CommandType::MESSAGE_SEND_FAILED, "消息发送请求格式不正确")};
+        return failed(responseBody, "消息发送请求格式不正确");
     }
 
     // 检查content
-    std::string content = data[protocolHeader::CONTENT].get<std::string>();
+    std::string content = data[protocolBody::CONTENT].get<std::string>();
     if (!isValidContent(content))
     {
         printf("消息内容校验不通过，消息发送失败\n");
-        return {setResponse(responseBody, protocolHeader::CommandType::MESSAGE_SEND_FAILED, "消息格式不正确")};
+        return failed(responseBody, "消息内容不能为空，且最多512个字符/2048字节");
     }
-    // 检查conversation_id--但感觉没啥好检查的--想想需要什么约束吗
-    std::uint64_t conversationId = data[protocolHeader::CONVERSATION_ID].get<std::uint64_t>();
-    if(!isValidConversationId(conversationId))
+
+    // 检查conversation_id
+    std::uint64_t conversationId = data[protocolBody::CONVERSATION_ID].get<std::uint64_t>();
+    if (!isValidConversationId(conversationId))
     {
         printf("会话id校验不通过,消息发送失败\n");
-        return {setResponse(responseBody, protocolHeader::CommandType::MESSAGE_SEND_FAILED, "会话id格式不正确")};
+        return failed(responseBody, "conversation_id 不合法");
     }
 
-    // 构造Message
-    Message message(userId,username,content,conversationId);
-    //保存至数据库-----这里由于数据字段不够，还不实现
-    // const CreateMessageResult createResult = MessageRepository::createMessage(message);
-    // if(createResult == CreateMessageResult::Failed)
-    // {
-    //     printf("数据库创建消息失败\n");
-    //     return {setResponse(responseBody, protocolHeader::CommandType::MESSAGE_SEND_FAILED, "服务器暂时无法处理消息创建请求，请稍后再试")};
-    // }
+    // 检查client_msg_id
+    std::string& clientMsgId = data[protocolBody::CLIENT_MSG_ID].get_ref<std::string&>();
+    if(!isValidClientMsgId(clientMsgId))
+    {
+        printf("客户端唯一消息id校验不通过,消息发送失败\n");
+        return failed(responseBody, "client_msg_id 不合法");
+    }
 
-    printf("消息创建成功\n");
-    return {setResponse(responseBody, protocolHeader::CommandType::MESSAGE_SEND_SUCCESS, "消息创建成功"),message};
+    // 当前只实现文本消息(type=1)，未实现的消息类型不能误入数据库。
+    const auto typeValue = data[protocolBody::TYPE].get<std::uint64_t>();
+    if (typeValue != 1)
+    {
+        return failed(responseBody, "当前仅支持文本消息(type=1)");
+    }
+
+    const auto type = static_cast<std::uint16_t>(typeValue);
+    const std::string clientMsgId = data[protocolBody::CLIENT_MSG_ID].get<std::string>();
+
+    // 创建待保存的 Message；serverMsgId 和 seq 暂时未知，由 Repository 在数据库事务内补齐。
+    Message pendingMessage(userId, username, content, conversationId, clientMsgId, type);
+    const CreateMessageResult createResult = MessageRepository::createMessage(pendingMessage);
+
+    if (createResult.status == CreateMessageStatus::ConversationNotFoundOrForbidden)
+    {
+        return failed(responseBody, "会话不存在，或当前用户无权在该会话发送消息");
+    }
+    if (createResult.status == CreateMessageStatus::ClientMsgIdConflict)
+    {
+        return failed(responseBody, "client_msg_id 已被用于另一条消息，请为新消息生成新的 ID");
+    }
+    if (createResult.status == CreateMessageStatus::Failed || !createResult.message.has_value())
+    {
+        return failed(responseBody, "服务器暂时无法保存消息，请稍后重试");
+    }
+
+    const Message &savedMessage = createResult.message.value();
+    const auto responseCommand = setResponse(responseBody, protocolHeader::CommandType::MESSAGE_SEND_SUCCESS, "消息已保存");
+
+    // 返回的是数据库已提交的结果。客户端可以用 last_seq 更新会话本地状态。
+    nlohmann::json response = nlohmann::json::parse(responseBody);
+    response[protocolBody::CONVERSATION_ID] = savedMessage.getConversationId();
+    response[protocolBody::CLIENT_MSG_ID] = savedMessage.getClientMsgId();
+    response[protocolBody::SERVER_MSG_ID] = savedMessage.getServerMsgId();
+    response[protocolBody::SEQ] = savedMessage.getSeq();
+
+    // 普通新消息的 last_seq 就是本条消息的 seq。
+    // 若这是重试请求，在重试发送之前
+    // 其他用户可能已经继续发了消息，因此尽量返回当前会话的真实 last_seq。
+    std::uint64_t currentLastSeq = savedMessage.getSeq();
+    if (createResult.status == CreateMessageStatus::Duplicate)
+    {
+        const auto lastSeqResult = ConversationRepository::getLastSeqByConversationId(
+            savedMessage.getConversationId());
+        if (lastSeqResult.status == ConversationQueryStatus::Found)
+        {
+            currentLastSeq = lastSeqResult.lastSeq;
+        }
+    }
+    response[protocolBody::LAST_SEQ] = currentLastSeq;
+    responseBody = response.dump();
+
+    const bool shouldBroadcast = createResult.status == CreateMessageStatus::Created;
+    return {responseCommand, savedMessage, shouldBroadcast};
 }
 
 bool MessageService::validateSendContentRequest(const std::string &body, nlohmann::json &data)
@@ -100,33 +164,41 @@ bool MessageService::validateSendContentRequest(const std::string &body, nlohman
     }
     catch (const nlohmann::json::parse_error &)
     {
-        printf("JSON 格式错误\n");
+        std::cerr << "消息 Body JSON 格式错误\n";
         return false;
     }
 
     if (!data.is_object())
     {
-        printf("JSON Body必须是对象\n");
+        std::cerr << "JSON Body必须是对象\n";
         return false;
     }
 
-    if (!data.contains(protocolHeader::CONTENT) || !data[protocolHeader::CONTENT].is_string())
+    if (!data.contains(protocolBody::CONTENT) || !data[protocolBody::CONTENT].is_string())
     {
-        printf("content 不存在或者不是字符串\n");
+        std::cerr << "content 不存在或者不是字符串\n";
         return false;
     }
 
-    if(!data.contains(protocolHeader::CONVERSATION_ID) || !data[protocolHeader::CONVERSATION_ID].is_number_unsigned())
+    if (!data.contains(protocolBody::CONVERSATION_ID) ||
+        !isUnsignedInteger(data[protocolBody::CONVERSATION_ID]))
     {
-        printf("conversation_id 不存在或者不是非负整数");
+        std::cerr << "conversation_id 不存在或者不是非负整数\n";
         return false;
     }
 
-    if(!data.contains(protocolHeader::LAST_SEQ) || !data[protocolHeader::LAST_SEQ].is_number_unsigned())
+    if (!data.contains(protocolBody::CLIENT_MSG_ID) || !data[protocolBody::CLIENT_MSG_ID].is_string())
     {
-        printf("last_seq 不存在或者不是非负整数");
+        std::cerr << "client_msg_id 不存在或者不是字符串\n";
         return false;
     }
+
+    if (!data.contains(protocolBody::TYPE) || !isUnsignedInteger(data[protocolBody::TYPE]))
+    {
+        std::cerr <<"last_seq 不存在或者不是非负整数\n";
+        return false;
+    }
+
     return true;
 }
 
@@ -138,4 +210,9 @@ bool MessageService::isValidContent(const std::string &content)
 bool MessageService::isValidConversationId(const std::uint64_t &conversationId)
 {
     return true;
+}
+
+bool MessageService::isValidClientMsgId(const std::string &clientMsgId)
+{
+    return !clientMsgId.empty() && clientMsgId.size() <= 64;
 }

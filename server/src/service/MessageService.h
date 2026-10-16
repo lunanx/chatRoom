@@ -1,6 +1,8 @@
 #pragma once
 
 #include "protocol/ProtocolHeader.h"
+#include "protocol/ProtocolBody.h"
+#include "repository/ConversationRepository.h"
 #include "repository/MessageRepository.h"
 #include "security/PasswordHasher.h"
 #include "model/Message.h"
@@ -10,8 +12,9 @@
 
 struct MessageSendResult
 {
-    protocolHeader::CommandType command;
+    protocolHeader::CommandType command{protocolHeader::CommandType::MESSAGE_SEND_FAILED};
     std::optional<Message> message;
+    bool shouldBroadcast{false};
 };
 
 class MessageService
@@ -19,8 +22,13 @@ class MessageService
 public:
     /*
         发送消息业务
+        认证用户身份由 Dispatcher 从 ClientSession 传入，
     */
-    static MessageSendResult sendContent(const std::string &body, std::string &responseBody, const std::uint64_t &userId, const std::string &username);
+    static MessageSendResult sendContent(
+        const std::string &body,
+        std::string &responseBody,
+        const std::uint64_t &userId,
+        const std::string &username);
 
 private:
     /*
@@ -42,7 +50,16 @@ private:
 
     /*
         检查conversation_id是否符合要求
-        检查内容:-- 不知道该检查啥，先直接返回true，想想需要添加什么约束
+        检查内容:
+        是否 > 0
     */
     static bool isValidConversationId(const std::uint64_t &conversationId);
+
+    /*
+        检查client_msg_id是否符合要求
+        检查内容:
+        是否为空
+        是否超过了64字节
+    */
+    static bool isValidClientMsgId(const std::string &clientMsgId);
 };

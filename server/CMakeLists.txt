@@ -37,6 +37,8 @@ add_executable(InternetChatRoomServer
 
     src/model/User.cpp
     src/model/User.h
+    src/model/Message.cpp
+    src/model/Message.h
     src/model/Conversation.cpp
     src/model/Conversation.h
 

@@ -6,6 +6,7 @@
 #include "protocol/ProtocolBody.h"
 #include <iostream>
 #include <memory>
+#include <cstdint>
 #include <string>
 
 /*
@@ -32,6 +33,11 @@ public:
     void disconnect();
     bool isConnected() const;
 
+    // 事务接口: 同一事务中的查询和更新必须复用同一个DatabaseManager
+    bool beginTransaction();
+    bool commitTransaction();
+    void rollbackTransaction() noexcept;
+
     // 返回最近一次数据库操作的错误码；成功时为 0，非 SQL 错误时可能为 -1。
     int lastErrorCode() const;
 
@@ -50,6 +56,7 @@ public:
 private:
     // 根据参数类型选择对应的数据库参数绑定函数
     void bindOne(sql::PreparedStatement &pstmt, int index, int value);
+    void bindOne(sql::PreparedStatement &pstmt, int index, std::uint64_t value);
     void bindOne(sql::PreparedStatement &pstmt, int index, double value);
     void bindOne(sql::PreparedStatement &pstmt, int index, const std::string &value);
 
@@ -138,7 +145,7 @@ inline bool DatabaseManager::exisit(const std::string &sql, const Args &...args)
 
     try
     {
-        //SQL语句执行成功，但没有结果，就返回false
+        // SQL语句执行成功，但没有结果，就返回false
         return queryResult.result->next();
     }
     catch (sql::SQLException &e)
