@@ -1,0 +1,980 @@
+#include "EpollReactor.h"
+#include "protocol/FrameDecoder.h"
+#include <sys/eventfd.h>
+#include <string.h>
+#include <unistd.h>
+#include <fcntl.h>
+#include <cerrno>
+#include <iostream>
+#include <utility>
+
+std::mutex mux;
+//------------------------EpollReactor----------------------
+EpollReactor::EpollReactor()
+    : m_sfd(-1),
+      m_subTimer(0),
+      m_MStopFD(-1),
+      m_MEpfd(-1),
+      m_MEvs{},
+      m_subReactors{},
+      m_threads{}
+{
+}
+
+EpollReactor::~EpollReactor()
+{
+    // 第一步：先通知所有仍在运行的 SubReactor 停止。
+    // 此阶段绝不能提前 delete 任意一个 SubReactor，因为其他 Reactor
+    // 可能仍通过 m_targetReactors 向它投递广播任务。
+    for (int i = 0; i < subMAXCnt; ++i)
+    {
+        if (m_subReactors[i] == nullptr ||
+            static_cast<std::size_t>(i) >= m_threads.size() ||
+            !m_threads[i].joinable())
+        {
+            continue;
+        }
+
+        const std::uint64_t one = 1;
+        ssize_t written;
+        do
+        {
+            written = write(m_subReactors[i]->getStopFD(), &one, sizeof(one));
+        } while (written == -1 && errno == EINTR);
+
+        if (written != static_cast<ssize_t>(sizeof(one)))
+        {
+            // eventfd 通知失败时记录错误，但仍尝试 join；不能在这里释放对象。
+            std::cerr << "通知 SubReactor 停止失败，reactor index=" << i
+                      << ", errno=" << errno << '\n';
+        }
+    }
+
+    // 第二步：等待所有线程退出。必须先 join 全部线程，再释放任意 Reactor。
+    for (auto &thread : m_threads)
+    {
+        if (thread.joinable())
+        {
+            thread.join();
+        }
+    }
+
+    // 第三步：现在没有线程再访问 m_targetReactors，才可以释放对象。
+    for (int i = 0; i < subMAXCnt; ++i)
+    {
+        delete m_subReactors[i];
+        m_subReactors[i] = nullptr;
+    }
+
+    if (m_MEpfd != -1)
+        close(m_MEpfd);
+    if (m_MStopFD != -1)
+        close(m_MStopFD);
+}
+
+bool EpollReactor::initMEpoll(int sfd)
+{
+    createMEpollFD();
+    if (m_MEpfd == -1)
+    {
+        return false;
+    }
+
+    if ((m_MStopFD = eventfd(0, EFD_NONBLOCK)) == -1) // 设置一个停止信号计数器，给控制端停止用
+    {
+        perror("m_stopSignalFD init error");
+        return false;
+    }
+
+    if (addToMEpoll(m_MStopFD) == false) // 将m_MStopFD文件描述符加入到epoll中
+    {
+        printf("m_MStopFD add to epoll error\n");
+        return false;
+    }
+
+    m_sfd = sfd;
+
+    if (addToMEpoll(m_sfd) == false) // 将m_sfd文件描述符加入到epoll中
+    {
+        printf("m_sfd add to epoll error\n");
+        return false;
+    }
+
+    for (int i = 0; i < subMAXCnt; i++)
+    {
+        m_subReactors[i] = new SubReactor();
+        if (m_subReactors[i]->initSub() == false)
+        {
+            printf("m_subReactors initSub error!\n");
+            delete m_subReactors[i];
+            m_subReactors[i] = nullptr;
+            return false;
+        }
+    }
+
+    // 将所有Reactors给每个SubReactor
+    std::array<SubReactor *, subMAXCnt> allReactors{};
+    for (int i = 0; i < subMAXCnt; i++)
+    {
+        allReactors[i] = m_subReactors[i];
+    }
+
+    for (int i = 0; i < subMAXCnt; i++)
+    {
+        if (!m_subReactors[i]->setTargetReactors(allReactors))
+        {
+            printf("setTargetReactors error!\n");
+            return false;
+        }
+    }
+
+    return true;
+}
+
+int EpollReactor::getMStopFD()
+{
+    return m_MStopFD;
+}
+
+void EpollReactor::createMEpollFD()
+{
+    m_MEpfd = epoll_create(1);
+    if (m_MEpfd == -1)
+    {
+        perror("m_MEpfd create error");
+        return;
+    }
+}
+
+bool EpollReactor::addToMEpoll(int fd)
+{
+    epoll_event ev;
+    ev.events = EPOLLIN;
+    ev.data.fd = fd;
+    if (epoll_ctl(m_MEpfd, EPOLL_CTL_ADD, fd, &ev) == -1)
+    {
+        perror("in m_MEpfd, add error");
+        return false;
+    }
+    return true;
+}
+
+int EpollReactor::setNonblocking(int fd)
+{
+    // 获取fd的文件描述符状态
+    int flags = fcntl(fd, F_GETFL, 0);
+    if (flags == -1)
+    {
+        perror("F_GETFL error");
+        return -1;
+    }
+
+    if (fcntl(fd, F_SETFL, flags | O_NONBLOCK) == -1)
+    {
+        perror("F_SETFL error");
+        return -1;
+    }
+
+    return 0;
+}
+
+void EpollReactor::run()
+{
+    if (!m_threads.empty())
+    {
+        m_threads.clear();
+    }
+    // 创建线程，将线程和subReactor对应
+    for (int i = 0; i < subMAXCnt; i++)
+    {
+        m_threads.emplace_back(&SubReactor::reactor, m_subReactors[i], i);
+    }
+
+    sockaddr_in cin;
+    socklen_t socklen = sizeof(cin);
+    while (1)
+    {
+        // 等待事件
+        int num = epoll_wait(m_MEpfd, m_MEvs, sizeof(m_MEvs) / sizeof(m_MEvs[0]), -1);
+        if (num == -1)
+        {
+            if (errno == EINTR)
+            {
+                continue;
+            }
+            perror("m_MEpfd wait error");
+            return;
+        }
+        for (int i = 0; i < num; i++)
+        {
+            int fd = m_MEvs[i].data.fd;
+            // 说明有新连接产生
+            if (fd == m_sfd)
+            {
+                socklen = sizeof(cin);
+                while (1)
+                {
+                    socklen = sizeof(cin);
+                    int newfd = accept(m_sfd, (sockaddr *)&cin, &socklen);
+                    if (newfd == -1)
+                    {
+                        if (errno == EAGAIN || errno == EWOULDBLOCK)
+                        {
+                            // 当前没有新连接
+                            break;
+                        }
+
+                        if (errno == EINTR)
+                        {
+                            // 突然中断
+                            continue;
+                        }
+
+                        perror("accept error");
+                        break;
+                    }
+                    printf("[%s:%d] accept success\n", inet_ntoa(cin.sin_addr), ntohs(cin.sin_port)); // 测试函数，开发后删除
+                    if (setNonblocking(newfd) == -1)
+                    {
+                        printf("setNonblock error\n");
+                        close(newfd);
+                        break;
+                    }
+                    // 有新连接来了,轮询sub
+                    auto sub = m_subReactors[m_subTimer++ % subMAXCnt];
+                    // 儿子都在 wait阻塞呢，先将客户端信息放到他的连接队列中
+                    // 唤醒 + 入队
+                    bool res = sub->addQueueConnFD(ConInfo{newfd, cin});
+                    if (!res)
+                    {
+                        close(newfd);
+                        continue;
+                    }
+                }
+            }
+            // 控制端发来了停止信号
+            else if (fd == m_MStopFD)
+            {
+                uint64_t cnt;
+                read(fd, &cnt, sizeof(cnt)); // 消耗事件
+                return;                      // 直接返回
+            }
+        }
+    }
+}
+
+//------------------------SubReactor----------------------
+SubReactor::SubReactor()
+    : m_wakeFD(-1),
+      m_epfd(-1),
+      m_stopSignalFD(-1),
+      m_queueConnFD(),
+      m_cliSessionsMap(),
+      m_evs{},
+      m_taskFD(-1),
+      m_sessionFdsByConversationId()
+{
+}
+
+SubReactor::~SubReactor()
+{
+    while (!m_queueConnFD.empty())
+    {
+        auto tmp = m_queueConnFD.front();
+        // 可能没创建cliSession对话就已经stop了
+        if (m_cliSessionsMap.find(tmp.m_fd) == m_cliSessionsMap.end())
+        {
+            close(tmp.m_fd);
+        }
+        // 如果找到了，不用你关，cliSession会自己关
+        m_queueConnFD.pop();
+    }
+
+    // 正常情况下线程退出前已通过 removeEpollFD 清理；析构时再做一次兜底。
+    while (!m_cliSessionsMap.empty())
+    {
+        clearSessionConversations(m_cliSessionsMap.begin()->first);
+        m_cliSessionsMap.erase(m_cliSessionsMap.begin());
+    }
+    m_sessionFdsByConversationId.clear();
+    m_conversationsBySessionFd.clear();
+
+    if (m_wakeFD != -1)
+        close(m_wakeFD);
+    if (m_stopSignalFD != -1)
+        close(m_stopSignalFD);
+    if (m_epfd != -1)
+        close(m_epfd);
+}
+
+bool SubReactor::initSub()
+{
+    createEpollFD();
+    if (m_epfd == -1)
+    {
+        return false;
+    }
+    if ((m_wakeFD = eventfd(0, EFD_NONBLOCK)) == -1) // 设置一个门铃，老爹会敲门铃，参数二为了不让read函数阻塞
+    {
+        perror("m_wakeFD init error");
+        return false;
+    }
+    if ((m_stopSignalFD = eventfd(0, EFD_NONBLOCK)) == -1) // 设置一个停止信号，当老爹delete的时候，要回收线程
+    {
+        perror("m_stopSignalFD init error");
+        return false;
+    }
+
+    if ((m_taskFD = eventfd(0, EFD_NONBLOCK)) == -1) // 消息处理信号
+    {
+        perror("m_taskFD init error");
+        return false;
+    }
+
+    if (addToEpoll(m_stopSignalFD) == false) // 将m_stopSignalFD文件描述符加入到epoll中
+    {
+        printf("m_stopSignalFD add to epoll error\n");
+        return false;
+    }
+    if (addToEpoll(m_wakeFD) == false) // 将m_wakeFD文件描述符加入到epoll中
+    {
+        printf("m_wakeFD add to epoll error\n");
+        return false;
+    }
+    if (addToEpoll(m_taskFD) == false) // 将m_taksFD文件描述符加入到epoll中
+    {
+        printf("m_taskFD add to epoll error\n");
+        return false;
+    }
+
+    return true;
+}
+
+bool SubReactor::setTargetReactors(const std::array<SubReactor *, subMAXCnt> &reactors)
+{
+    // 检查是否所有SubReactor都存在
+    for (SubReactor *reactor : reactors)
+    {
+        if (reactor == nullptr)
+        {
+            printf("setTargetReactors error: nullptr create\n");
+            return false;
+        }
+    }
+    // 复制指针数组,不复制SubReactor对象
+    m_targetReactors = reactors;
+
+    return true;
+}
+
+bool SubReactor::addQueueConnFD(const ConInfo &info)
+{
+    mux.lock(); // 获取锁资源
+    uint64_t cnt = 1;
+    ssize_t res;
+    do
+    {
+        res = write(m_wakeFD, &cnt, sizeof(cnt));
+    } while (res == -1 && errno == EINTR);
+
+    if (res == -1)
+    {
+
+        perror("m_wakeFD write error");
+        mux.unlock(); // 这里一定要释放锁资源，不然就会死锁了
+        return false;
+    }
+
+    if (res != sizeof(cnt))
+    {
+        printf("m_wakeFD write size error\n");
+        mux.unlock(); // 这里一定要释放锁资源，不然就会死锁了
+        return false;
+    }
+
+    m_queueConnFD.push(info);
+
+    mux.unlock(); // 释放锁资源
+
+    return true;
+}
+
+bool SubReactor::enqueueBroadcastTask(const BroadcastTask &task)
+{
+    // 先拿队列锁。目标线程即使立即从 eventfd 醒来，也会在取队列时等待此锁。
+    std::lock_guard<std::mutex> lock(m_broadcastMutex); // 离开作用域自动释放
+
+    uint64_t cnt = 1;
+    ssize_t res;
+    do
+    {
+        res = write(m_taskFD, &cnt, sizeof(cnt));
+    } while (res == -1 && errno == EINTR);
+
+    if (res == -1)
+    {
+        perror("m_taskFD write error");
+        return false;
+    }
+
+    if (res != static_cast<ssize_t>(sizeof(cnt)) &&
+        !(res == -1 && (errno == EAGAIN || errno == EWOULDBLOCK)))
+    {
+        std::cerr << "m_taskFD 写入长度异常\n";
+        return false;
+    }
+
+    // EAGAIN 表示 eventfd 计数器已经达到可写上限，通常说明已有唤醒通知待处理；
+    // 任务仍然入队，消费者醒来后会把整个队列排空。
+    m_broadcastQueue.push(task);
+    return true;
+}
+
+int SubReactor::getWakeFD()
+{
+    return m_wakeFD;
+}
+
+int SubReactor::getStopFD()
+{
+    return m_stopSignalFD;
+}
+
+void SubReactor::createEpollFD()
+{
+    m_epfd = epoll_create(1);
+    if (m_epfd == -1)
+    {
+        perror("m_epfd create error");
+        return;
+    }
+}
+
+bool SubReactor::addToEpoll(int fd)
+{
+    // 已经存在，算添加成功
+    if (m_cliSessionsMap.find(fd) != m_cliSessionsMap.end())
+    {
+        return true;
+    }
+    epoll_event ev;
+    ev.events = EPOLLIN | EPOLLRDHUP;
+    ev.data.fd = fd;
+    if (epoll_ctl(m_epfd, EPOLL_CTL_ADD, fd, &ev) == -1)
+    {
+        perror("in m_epfd, add error");
+        return false;
+    }
+
+    return true;
+}
+
+void SubReactor::removeEpollFD(int fd)
+{
+    // 统一关闭路径：先清理订阅索引，再从 epoll 删除并销毁 Session。
+    // 必须在 Session 被销毁、fd 可能被系统复用之前清理旧订阅，
+    // 否则旧 fd 可能残留在会话索引里，导致消息误发给后来的连接。
+    auto sessionIt = m_cliSessionsMap.find(fd);
+    if (sessionIt == m_cliSessionsMap.end())
+    {
+        // 即使 Session 已不存在，也尽量清理可能残留的反向索引。
+        clearSessionConversations(fd);
+        return;
+    }
+
+    clearSessionConversations(fd);
+    if (m_epfd != -1 && epoll_ctl(m_epfd, EPOLL_CTL_DEL, fd, nullptr) == -1 &&
+        errno != ENOENT && errno != EBADF)
+    {
+        perror("EPOLL_CTL_DEL error");
+    }
+    m_cliSessionsMap.erase(sessionIt);
+}
+
+void SubReactor::trackSessionConversation(int fd, std::uint64_t conversationId)
+{
+    if (m_cliSessionsMap.find(fd) == m_cliSessionsMap.end() || conversationId == 0)
+    {
+        return;
+    }
+    m_sessionFdsByConversationId[conversationId].insert(fd);
+    m_conversationsBySessionFd[fd].insert(conversationId);
+}
+
+void SubReactor::clearSessionConversations(int fd)
+{
+    auto reverseIt = m_conversationsBySessionFd.find(fd);
+    if (reverseIt == m_conversationsBySessionFd.end())
+    {
+        return;
+    }
+    // 遍历当前客户端连接fd所在的所有会话id
+    // 通过这个会话id,m_sessionFdsByConversationId将里面的fd删除
+    for (const std::uint64_t conversationId : reverseIt->second)
+    {
+        auto membersIt = m_sessionFdsByConversationId.find(conversationId);
+        if (membersIt == m_sessionFdsByConversationId.end())
+        {
+            continue;
+        }
+        // 删除断开连接的fd
+        membersIt->second.erase(fd);
+        if (membersIt->second.empty())
+        {
+            m_sessionFdsByConversationId.erase(membersIt);
+        }
+    }
+    m_conversationsBySessionFd.erase(reverseIt);
+}
+
+bool SubReactor::modifyEpollFD(int fd, uint32_t events)
+{
+    // 不存在，不需要修改,算修改失败
+    if (m_cliSessionsMap.find(fd) == m_cliSessionsMap.end())
+    {
+        return false;
+    }
+
+    epoll_event ev;
+    ev.events = events;
+    ev.data.fd = fd;
+    if (epoll_ctl(m_epfd, EPOLL_CTL_MOD, fd, &ev) == -1)
+    {
+        perror("EPOLL_CTL_MOD error");
+        return false;
+    }
+    return true;
+}
+// 只被老爹点名一次，之后就是利用eventfd来通知有新客户连接
+// 这里的函数参数用于测试，之后要记得删除
+void SubReactor::reactor(int reactorId)
+{
+
+    while (1)
+    {
+        // 等待事件
+        int num = epoll_wait(m_epfd, m_evs, sizeof(m_evs) / sizeof(m_evs[0]), -1);
+        if (num == -1)
+        {
+            if (errno == EINTR)
+            {
+                continue;
+            }
+            perror("m_epfd wait error");
+            return;
+        }
+        printf("reactorId = %d 被唤醒了\n", reactorId);
+        for (int i = 0; i < num; i++)
+        {
+            int newfd = m_evs[i].data.fd;
+            uint32_t events = m_evs[i].events;
+            // 说明父进程往m_wakeFD写东西了,也就是队列里有数据了
+            if (newfd == m_wakeFD)
+            {
+                // 读取计数器
+                uint64_t cnt = 0;
+                ssize_t res;
+                do
+                {
+                    res = read(newfd, &cnt, sizeof(cnt)); // 尝试消耗事件
+                } while (res == -1 && errno == EINTR);
+
+                // 还是有错误
+                if (res == -1)
+                {
+                    if (errno == EAGAIN || errno == EWOULDBLOCK)
+                    {
+                        // 当前没有待处理的eventfd计数
+                        continue;
+                    }
+
+                    // eventfd本身出现了异常
+                    perror("m_wakeFD read error");
+                    return;
+                }
+                // res大小并不是要的计数
+                if (res != sizeof(cnt))
+                {
+                    printf("m_wakeFD read size error\n");
+                    return;
+                }
+
+                while (cnt-- != 0)
+                {
+                    std::unique_lock<std::mutex> lock(mux); // 获取锁资源
+
+                    if (m_queueConnFD.empty())
+                    {
+                        printf("wakeFD has count ,but connection queue may mismatch\n");
+                        break; // 离开作用域自动释放
+                    }
+                    ConInfo newConInfo = m_queueConnFD.front();
+                    m_queueConnFD.pop();
+
+                    lock.unlock(); // 释放锁资源 这里一定要手动释放
+                    if (addToEpoll(newConInfo.m_fd))
+                    {
+                        // 创建session哈希表
+                        m_cliSessionsMap.emplace(
+                            newConInfo.m_fd,
+                            std::make_unique<ClientSession>(
+                                newConInfo.m_fd,
+                                newConInfo.m_cin));
+                    }
+                    else
+                    {
+                        close(newConInfo.m_fd);
+                    }
+                }
+            }
+            // 老爹发出了停止信号，该溜溜球了
+            else if (newfd == m_stopSignalFD)
+            {
+                // 读取计数器
+                uint64_t cnt = 0;
+                ssize_t res;
+                do
+                {
+                    res = read(newfd, &cnt, sizeof(cnt)); // 尝试消耗事件
+                } while (res == -1 && errno == EINTR);
+
+                // 还是有错误
+                if (res == -1)
+                {
+                    if (errno == EAGAIN || errno == EWOULDBLOCK)
+                    {
+                        // 当前没有待处理的eventfd计数
+                        continue;
+                    }
+
+                    // eventfd本身出现了异常
+                    perror("m_stopSignalFD read error");
+                    return;
+                }
+                // res大小并不是要的计数
+                if (res != sizeof(cnt))
+                {
+                    printf("m_stopSignalFD read size error\n");
+                    return;
+                }
+
+                return; // 直接return
+            }
+            else if (newfd == m_taskFD)
+            {
+                // 读取计数器
+                uint64_t cnt = 0;
+                ssize_t res;
+                do
+                {
+                    res = read(newfd, &cnt, sizeof(cnt)); // 尝试消耗事件
+                } while (res == -1 && errno == EINTR);
+
+                // 还是有错误
+                if (res == -1)
+                {
+                    if (errno == EAGAIN || errno == EWOULDBLOCK)
+                    {
+                        // 当前没有待处理的eventfd计数
+                        continue;
+                    }
+
+                    // eventfd本身出现了异常
+                    perror("m_taskFD read error");
+                    return;
+                }
+                // res大小并不是要的计数
+                if (res != sizeof(cnt))
+                {
+                    printf("m_taskFD read size error\n");
+                    return;
+                }
+
+                while (1)
+                {
+                    BroadcastTask newbroadcastQueue;
+                    {
+                        std::lock_guard<std::mutex> lock(m_broadcastMutex);
+                        if (m_broadcastQueue.empty())
+                        {
+                            break;
+                        }
+                        newbroadcastQueue = std::move(m_broadcastQueue.front());
+                        m_broadcastQueue.pop();
+                    }
+
+                    std::uint64_t conversationId = newbroadcastQueue.conversationId;
+                    auto cliSessions = m_sessionFdsByConversationId.find(conversationId);
+                    if (cliSessions == m_sessionFdsByConversationId.end())
+                    {
+                        // 说明这个conversation_id 在当前线程并没有客户端加入了
+                        // 进行检查下一个conversation_id
+                        continue;
+                    }
+                    // 复制fd列表，
+                    // 之后发送失败时 removeEpollFD 会修改索引集合。
+                    auto clientFDSet = cliSessions->second;
+                    std::string sendFrame = newbroadcastQueue.encodedFrame;
+                    for (int fd : clientFDSet)
+                    {
+                        auto tmp = m_cliSessionsMap.find(fd);
+                        if (tmp == m_cliSessionsMap.end())
+                        {
+                            // 说明fd并没有对应的客户端,直接下一个
+                            continue;
+                        }
+                        auto cli = tmp->second.get();
+                        if (!cli->isAuthenticated())
+                        {
+                            continue;
+                        }
+                        int res = cli->handle_write(sendFrame);
+                        if (res == -1) // 有错误
+                        {
+                            printf("handle_write error\n");
+                            removeEpollFD(fd);
+                            continue; // 进行下一个cli
+                        }
+                        else if (res == 0) // 对端下线了，将fd从epoll中DEL
+                        {
+                            removeEpollFD(fd);
+                            continue; // 进行下一个cli
+                        }
+                        else if (res == 1)
+                        {
+                            if (cli->hasWriteBufPending() == true)
+                            {
+                                modifyEpollFD(fd, EPOLLIN | EPOLLRDHUP | EPOLLOUT);
+                            }
+                            // 这里发送不出去,由epoll重新判断EPOLLOUT
+                            continue; // 进行下一个cli
+                        }
+                        else if (res == 2)
+                        {
+                            // 虽然已经默认发送完了，但这里还是判断一下
+                            if (cli->hasWriteBufPending() == false)
+                            {
+                                modifyEpollFD(fd, EPOLLIN | EPOLLRDHUP);
+                            }
+                            continue; // 进行下一个cli
+                        }
+                    }
+                }
+            }
+            else
+            {
+                // 如果不存在就下一个
+                auto it = m_cliSessionsMap.find(newfd);
+                if (it == m_cliSessionsMap.end())
+                {
+                    continue;
+                }
+                // 注意ClientSession里面封装了读写事件
+                auto cli = it->second.get();
+                if (events & EPOLLERR)
+                {
+                    int error = 0;
+                    socklen_t len = sizeof(error);
+                    if (getsockopt(newfd, SOL_SOCKET, SO_ERROR, &error, &len) == -1)
+                    {
+                        perror("getsockopt error");
+                    }
+                    else
+                    {
+                        printf("EPOLLERR: socket error: %s\n", strerror(error));
+                    }
+                    removeEpollFD(newfd);
+                    continue; // 继续下一个epoll
+                }
+
+                if (events & EPOLLHUP)
+                {
+                    printf("EPOLLHUP: connection hang up\n");
+                    removeEpollFD(newfd);
+                    continue; // 继续下一个epoll
+                }
+
+                if (events & (EPOLLIN | EPOLLRDHUP))
+                {
+                    int res = cli->handle_read(); // 读取客户端的消息
+                    std::string &buf = cli->getRecvBuf();
+                    if (res == 0) // 对端下线了，将fd从epoll中DEL
+                    {
+                        removeEpollFD(newfd);
+                        continue;
+                    }
+                    else if (res == -1) // 有错误
+                    {
+                        printf("handle_read error\n");
+                        removeEpollFD(newfd);
+                        continue;
+                    }
+                    // 客户端的消息没问题，开始解析
+                    size_t offset = 0;
+                    bool isRemoveFD = false; // 防止删除了对象，仍然继续使用
+                    while (1)
+                    {
+                        // 将buf传给Decoder解析
+                        protocolHeader::PacketFrame outputFrame;
+                        DecoderStatus status = m_decoder.parseBufPacket(buf, outputFrame, offset);
+                        if (status == DecoderStatus::ProtocolError)
+                        {
+                            // 客户端发的数据有问题，关闭客户端
+                            removeEpollFD(newfd);
+                            isRemoveFD = true;
+                            break;
+                        }
+                        else if (status == DecoderStatus::NeedMoreData)
+                        {
+                            break;
+                        }
+                        else if (status == DecoderStatus::PacketReady)
+                        {
+                            // 处理frame，但具体还未实现，先写主要架构
+                            // 主要实现的时候注意，outputFrame是局部变量
+
+                            //-------以下也是测试，是为了搭配测试--------
+                            auto responseResult = m_dispatcher.dispatch(outputFrame, *cli);
+                            nlohmann::json responseBody = nlohmann::json::parse(responseResult.frame.m_body);
+                            // 如果 responseResult 中有新保存的 Message，就通过跨 SubReactor 任务队列进行 TCP 投递。
+                            // 每个目标线程只查找和操作自己管理的 ClientSession。
+                            // 规定是服务器主动推送，所以requestId为0
+                            if (responseResult.message.has_value())
+                            {
+                                // 会话id ，添加到当前客户端的双向索引表
+                                const Message &message = responseResult.message.value();
+                                trackSessionConversation(newfd, message.getConversationId());
+                                // 封装发送给对应会话的客户端的数据包，并唤醒其他相关线程
+                                BroadcastTask task;
+                                nlohmann::json body = {
+                                    {protocolBody::CONVERSATION_ID, message.getConversationId()},
+                                    {protocolBody::CLIENT_MSG_ID, message.getClientMsgId()},
+                                    {protocolBody::SERVER_MSG_ID, message.getServerMsgId()},
+                                    {protocolBody::SEQ, message.getSeq()},
+                                    {protocolBody::LAST_SEQ, message.getSeq()},
+                                    {protocolBody::USER_ID, message.getSenderId()},
+                                    {protocolBody::USERNAME, message.getSenderName()},
+                                    {protocolBody::TYPE, message.getType()},
+                                    {protocolBody::CONTENT, message.getContent()}};
+                                task.conversationId = message.getConversationId();
+                                const auto pushCommand = message.getConversationType() == 1
+                                                             ? protocolHeader::CommandType::PRIVATE_MESSAGE_RECV
+                                                             : protocolHeader::CommandType::GROUP_MESSAGE_RECV;
+                                task.encodedFrame = m_encoder.buildBufPacket(
+                                    static_cast<std::uint16_t>(pushCommand), 0, body);
+                                // 给另外每个SubReactor投递消息队列
+                                // 依旧是唤醒+入队
+                                // 投递失败不是线程停止信号；记录错误后继续尝试其他 Reactor。
+                                for (SubReactor *target : m_targetReactors)
+                                {
+                                    if (target == nullptr || !target->enqueueBroadcastTask(task))
+                                    {
+                                        std::cerr << "广播任务投递失败，目标 Reactor 暂未接收任务\n";
+                                    }
+                                    printf("投递线程成功\n");
+                                }
+                            }
+
+                            // 客户端创建/获取会话成功后，记录该连接在此会话中的本地订阅关系。
+                            if (responseResult.conversationId.has_value())
+                            {
+                                trackSessionConversation(newfd, responseResult.conversationId.value());
+                                responseBody[protocolBody::CONVERSATION_ID] = responseResult.conversationId.value();
+                            }
+                            if (responseResult.lastSeq.has_value())
+                            {
+                                responseBody[protocolBody::LAST_SEQ] = responseResult.lastSeq.value();
+                            }
+                            // 成功退出登录后，不再向该链接推送会话消息
+                            if (responseResult.frame.m_command == static_cast<std::uint16_t>(protocolHeader::CommandType::LOGOUT_SUCCESS))
+                            {
+                                clearSessionConversations(newfd);
+                            }
+                            // 以下服务器响应发送消息的客户端
+                            std::string data = m_encoder.buildBufPacket(responseResult.frame.m_command, responseResult.frame.m_requestId, responseBody);
+                            res = cli->handle_write(data);
+                            if (res == -1) // 有错误
+                            {
+                                printf("handle_write error\n");
+                                removeEpollFD(newfd);
+                                isRemoveFD = true;
+                                break;
+                            }
+                            else if (res == 0) // 对端下线了，将fd从epoll中DEL
+                            {
+                                removeEpollFD(newfd);
+                                isRemoveFD = true;
+                                break;
+                            }
+                            else if (res == 1)
+                            {
+                                if (cli->hasWriteBufPending() == true)
+                                {
+                                    modifyEpollFD(newfd, EPOLLIN | EPOLLRDHUP | EPOLLOUT);
+                                }
+                                // 这里发送不出去，那我就直接break，epoll重新判断EPOLLOUT
+                                break;
+                            }
+                            else if (res == 2)
+                            {
+                                // 虽然已经默认发送完了，但这里还是判断一下
+                                if (cli->hasWriteBufPending() == false)
+                                {
+                                    modifyEpollFD(newfd, EPOLLIN | EPOLLRDHUP);
+                                }
+                                // 继续等待下一次解析
+                                continue;
+                            }
+
+                            //-------测试结束
+
+                            // 自己之后要TODO：
+                            //  1待将outputFrame发送给`其他地方`
+                            //  2继续解析 continue;
+                        }
+                    }
+                    // FD已经被删除了，要跳过当前的epoll event
+                    if (isRemoveFD)
+                    {
+                        continue; // 跳过当前
+                    }
+                    // 正常解析完的数据可以删除了
+                    buf.erase(0, offset);
+                }
+
+                if (events & EPOLLOUT)
+                {
+                    // ---------------以下为测试！！！！！！----------------------
+
+                    // 本来这里应该是吧outputframe给其他类进一步处理的，但因为还没设置其他类，没办法直接加入EPOLLOUT，就只想到这样测试了
+                    // 发送空数据继续处理未发送的数据
+                    int res = cli->handle_write("");
+                    if (res == -1) // 有错误
+                    {
+                        printf("handle_write error\n");
+                        removeEpollFD(newfd);
+                        continue; // 继续下一个epoll
+                    }
+                    else if (res == 0) // 对端下线了，将fd从epoll中DEL
+                    {
+                        removeEpollFD(newfd);
+                        continue; // 继续下一个epoll
+                    }
+                    else if (res == 2)
+                    {
+                        // 虽然已经默认发送完了，但这里还是判断一下
+                        if (cli->hasWriteBufPending() == false)
+                        {
+                            modifyEpollFD(newfd, EPOLLIN | EPOLLRDHUP);
+                        }
+                        continue; // 继续下一个epoll
+                    }
+
+                    // res == 1的情况不需要在判断了，因为就是有EPOLLOUT才进入的这里。
+
+                    //----------- 测试结束
+                }
+            }
+        }
+    }
+}

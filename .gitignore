@@ -67,3 +67,14 @@ vcpkg_installed/
 # test output & cache
 Testing/
 .cache/
+
+# 真实数据库配置：禁止提交
+/config/database.conf
+/config/*.local.conf
+
+# 本地环境变量文件
+.env
+.env.*
+
+# 允许提交无隐私的环境变量模板
+!.env.example

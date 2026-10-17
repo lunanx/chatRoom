@@ -1,0 +1,96 @@
+#pragma once
+
+#include <iostream>
+#include <string>
+#include <sys/types.h>
+#include <sys/socket.h>
+#include <netinet/in.h>
+#include <arpa/inet.h>
+#include <cstdint>
+#include <optional>
+struct AuthenticatedUser
+{
+    std::uint64_t userId;
+    std::string username;
+};
+
+/*
+    该类用于与客户端通信
+
+    这里留了getter用于经过数据库后服务器向客户端回消息，具体实现后续再说，先进行初步的通信
+*/
+class ClientSession
+{
+public:
+    // ClientSession 独占管理客户端 Socket，不允许复制。
+    ClientSession(const ClientSession &) = delete;
+    ClientSession &operator=(const ClientSession &) = delete;
+    /*
+        构造函数
+    */
+    ClientSession(int cfd, sockaddr_in cin);
+    /*
+        析构函数，这里用于关闭客户端的套接字
+    */
+    ~ClientSession();
+    /*
+        将发送端字节流发送
+        参数flag默认为MSG_NOSIGNAL，避免SIGPIPE
+        返回值  -1  发送错误
+            0   对端下线
+            1   暂时发送不出去
+            2   全部发完了
+    */
+    int handle_write(const std::string &data, int flags = MSG_NOSIGNAL);
+    /*
+        从接收端读取字节流，可能会读取A的一部分+B的一部分，所以每次读取不应该清空。
+        返回值  -1  接收错误
+            0   对端下线
+            1   数据读干净了
+    */
+    int handle_read();
+    /*
+        用于外部获取客户端套接字
+    */
+    int getClientSocket(); // 获取m_cfd
+    /*
+        用于外部获取客户端地址信息
+    */
+    sockaddr_in getAddr(); // 获取m_addr
+    /*
+        用于外部获取发送端数据
+    */
+    std::string getWriteBuf();
+    /*
+        用于外部获取接收端数据
+    */
+    std::string &getRecvBuf();
+
+    /*
+        判断发送端缓冲区是否有数据
+    */
+    bool hasWriteBufPending();
+
+    /*
+        登录与退出登录相关函数
+    */
+    void loginAs(std::uint64_t userId, const std::string &username);
+    void logout();
+    bool isAuthenticated() const;
+    const std::optional<AuthenticatedUser> &getAuthenticatedUser() const;
+
+private:
+    int m_cfd; // 客户端套接字
+
+    std::string m_writeBuf; // 发送端缓冲区数据
+
+    std::string m_recvBuf; // 接收端缓冲区数据
+
+    struct sockaddr_in m_caddr; // 客户端地址信息
+
+    /*
+        没有值：当前连接尚未登录。
+        有值：当前连接拥有已验证的用户身份。
+    */
+    std::optional<AuthenticatedUser> m_authenticatedUser;
+};
