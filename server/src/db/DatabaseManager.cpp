@@ -95,7 +95,7 @@ bool DatabaseManager::commitTransaction()
     {
         m_connectionLease.get()->setAutoCommit(true);
     }
-    catch (const sql::SQLException &e)
+    catch (sql::SQLException e)
     {
         m_lastErrorCode = e.getErrorCode();
         std::cerr << "事务已提交，但恢复 autocommit 失败，将丢弃连接: "

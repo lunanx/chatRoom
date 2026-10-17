@@ -153,7 +153,7 @@ std::unique_ptr<sql::Connection> DatabaseConnectionPool::createConnection()
                                     {"password", m_config.password}});
         return std::unique_ptr<sql::Connection>(driver->connect(url, properties));
     }
-    catch (const sql::SQLException &error)
+    catch (sql::SQLException error)
     {
         std::cerr << "创建 MariaDB 连接失败: " << error.what()
                   << "，错误代码: " << error.getErrorCode() << '\n';
