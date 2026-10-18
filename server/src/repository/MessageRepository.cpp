@@ -2,8 +2,8 @@
 #include "protocol/ProtocolBody.h"
 
 #include <iostream>
-#include <limits>
 #include <string>
+#include <algorithm>
 
 namespace
 {
@@ -262,7 +262,7 @@ CreateMessageResult MessageRepository::createMessage(const Message &message)
     }
 }
 
-QueryHistoricalMessageResult MessageRepository::queryHistoricalMessage(const std::uint64_t conversation_id, const std::uint64_t cursorSeq)
+QueryHistoricalMessageResult MessageRepository::queryHistoricalMessage(const std::uint64_t conversation_id, const std::uint64_t cursorSeq, const std::uint64_t userId)
 {
     DatabaseManager dbManager;
     if (!dbManager.connect())
@@ -270,10 +270,52 @@ QueryHistoricalMessageResult MessageRepository::queryHistoricalMessage(const std
         std::cerr << "数据库连接失败，查询历史消息\n";
         return {QueryHistoricalMessageStatus::Error};
     }
+    // 第一步：检查当前用户是否有权访问该会话。
+    //
+    // 私聊：当前用户必须是 user_id_1 或 user_id_2。
+    // 群聊：当前用户必须是正常群组中的成员。
 
-    auto queryResult = dbManager.query(
-        "SELECT content FROM Message WHERE conversation_id = ? AND seq < ? AND status = 1 ORDER BY seq DESC LIMIT 5",
+    auto permissionResult = dbManager.query(
+        "SELECT c.id FROM Conversation c "
+        "WHERE c.id = ? AND ("
+        "  (c.type = 1 AND "
+        "   (c.user_id_1 = ? OR c.user_id_2 = ?)) "
+        "  OR (c.type = 2 AND EXISTS ("
+        "    SELECT 1 FROM GroupMember gm "
+        "    INNER JOIN `Group` g ON g.id = gm.group_id "
+        "    WHERE gm.group_id = c.group_id "
+        "      AND gm.user_id = ? "
+        "      AND g.status = 1"
+        "  ))"
+        ") LIMIT 1",
         conversation_id,
+        userId,
+        userId,
+        userId);
+
+    if (!permissionResult.succeeded || !permissionResult.result)
+    {
+        std::cerr << "检查历史消息会话权限失败\n";
+        return {QueryHistoricalMessageStatus::Error};
+    }
+
+    if (!permissionResult.result->next())
+    {
+        return {QueryHistoricalMessageStatus::Forbidden};
+    }
+
+    // 第二步：查询历史消息。
+    //
+    // cursorSeq == 0：不限制 seq，获取最新的 5 条。
+    // cursorSeq > 0：只获取 seq 严格小于 cursorSeq 的消息。
+    auto queryResult = dbManager.query(
+        "SELECT seq, content FROM Message "
+        "WHERE conversation_id = ? "
+        "  AND status = 1 "
+        "  AND (? = 0 OR seq < ?) "
+        "ORDER BY seq DESC LIMIT 5",
+        conversation_id,
+        cursorSeq,
         cursorSeq);
 
     if (!queryResult.succeeded || !queryResult.result)
@@ -283,22 +325,37 @@ QueryHistoricalMessageResult MessageRepository::queryHistoricalMessage(const std
 
     try
     {
-        std::array<std::string,5> contents;
-        int size = 0;
-        while(queryResult.result->next())
+        std::vector<HistoricalMessage> contents;
+
+        while (queryResult.result->next())
         {
-            auto cont = queryResult.result->getString(protocolBody::CONTENT);
-            contents[size++] = std::string(cont.c_str(),cont.length());
+            const auto seqValue = queryResult.result->getString(1);
+            const auto textValue = queryResult.result->getString(2);
+
+            HistoricalMessage message;
+
+            message.seq = static_cast<std::uint64_t>(
+                std::stoull(seqValue.c_str()));
+
+            message.text = std::string(
+                textValue.c_str(),
+                textValue.length());
+
+            contents.push_back(std::move(message));
         }
-        if(size == 0)
+        if (contents.empty())
         {
             return {QueryHistoricalMessageStatus::NotFound};
         }
+        // SQL 按 seq 倒序取最新的 5 条。
+        // 返回客户端之前反转，让消息按 seq 从小到大排列。
+        std::reverse(contents.begin(), contents.end());
+
         return {QueryHistoricalMessageStatus::Found,std::move(contents)};
     }
     catch (sql::SQLException &e)
     {
-        std::cerr << "查询用户密码哈希失败: " << e.what()
+        std::cerr << "查询历史消息失败: " << e.what()
                   << "，错误代码: " << e.getErrorCode() << '\n';
         return {QueryHistoricalMessageStatus::Error};
     }

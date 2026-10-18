@@ -2,6 +2,8 @@
 
 #include "db/DatabaseManager.h"
 #include "model/Message.h"
+#include <string>
+#include <vector>
 #include <optional>
 
 enum class CreateMessageStatus
@@ -22,14 +24,25 @@ struct CreateMessageResult
 enum class QueryHistoricalMessageStatus
 {
     Error,
+    Forbidden, // 当前用户无权访问这个会话
     NotFound,
     Found
 };
 
+//一条历史消息
+struct HistoricalMessage
+{
+    std::uint64_t seq{0};
+    std::string text;
+};
+
 struct QueryHistoricalMessageResult
 {
-    QueryHistoricalMessageStatus status{QueryHistoricalMessageStatus::Error};
-    std::optional<std::array<std::string,5>> contents;
+    QueryHistoricalMessageStatus status{
+        QueryHistoricalMessageStatus::Error
+    };
+
+    std::optional<std::vector<HistoricalMessage>> contents;
 };
 
 class MessageRepository
@@ -44,6 +57,11 @@ public:
         查询conversation_id下的历史消息，单次查询5个
         seq = 0 表示获取最近的五条消息
         seq > 0 表示获取序号严格小于seq的最近五条消息
+
+        同时检查 userId 是否有权访问 conversation_id。
     */
-    static QueryHistoricalMessageResult queryHistoricalMessage(const std::uint64_t conversation_id, const std::uint64_t seq);
+    static QueryHistoricalMessageResult queryHistoricalMessage(
+        const std::uint64_t conversation_id, 
+        const std::uint64_t seq,
+        const std::uint64_t userId);
 };

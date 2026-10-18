@@ -55,8 +55,6 @@ namespace protocolBody
     /*
         历史消息相关
     */
-    constexpr const char *HITSTORICALMESSAGESPLIT = "###";
-
     constexpr const char *TEXT = "text";
 
     constexpr const char *NEXT_CURSOR = "next_cursor";
