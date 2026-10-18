@@ -32,9 +32,12 @@ enum class QueryHistoricalMessageStatus
 //一条历史消息
 struct HistoricalMessage
 {
-    std::uint64_t seq{0};
-    std::string text;
+    std::uint64_t seq{0}; // 会话内的消息序号
+    std::string text; // 消息文本
+    std::uint64_t senderId{0}; //发送者的用户 ID
+    std::string senderName; //发送者的用户名
 };
+
 
 struct QueryHistoricalMessageResult
 {

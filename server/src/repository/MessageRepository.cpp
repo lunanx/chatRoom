@@ -304,22 +304,48 @@ QueryHistoricalMessageResult MessageRepository::queryHistoricalMessage(const std
         return {QueryHistoricalMessageStatus::Forbidden};
     }
 
+    // 权限检查已经完成，不再需要第一次查询的结果。
+    // 及时释放结果集和预处理语句，避免数据库资源长期占用，
+    // 并降低未释放的查询资源，影响同一连接后续查询的风险。
+    permissionResult.result.reset();
+    permissionResult.statement.reset();
+
     // 第二步：查询历史消息。
     //
-    // cursorSeq == 0：不限制 seq，获取最新的 5 条。
-    // cursorSeq > 0：只获取 seq 严格小于 cursorSeq 的消息。
-    auto queryResult = dbManager.query(
-        "SELECT seq, content FROM Message "
-        "WHERE conversation_id = ? "
-        "  AND status = 1 "
-        "  AND (? = 0 OR seq < ?) "
-        "ORDER BY seq DESC LIMIT 5",
-        conversation_id,
-        cursorSeq,
-        cursorSeq);
+    // seq = 0：查询最新的 5 条消息。
+    // seq > 0：查询序号严格小于 seq 的最近 5 条消息。
+    //
+    // 通过 User 表关联发送者信息。
+    DatabaseQueryResult queryResult;
+
+    if (cursorSeq == 0)
+    {
+        queryResult = dbManager.query(
+            "SELECT m.seq, m.content, m.sender_id, u.username "
+            "FROM Message m "
+            "INNER JOIN `User` u ON u.id = m.sender_id "
+            "WHERE m.conversation_id = ? "
+            "  AND m.status = 1 "
+            "ORDER BY m.seq DESC LIMIT 5",
+            conversation_id);
+    }
+    else
+    {
+        queryResult = dbManager.query(
+            "SELECT m.seq, m.content, m.sender_id,u.username "
+            "FROM MESSAGE m "
+            "INNER JOIN User u ON u.id = m.sender_id "
+            "WHERE conversation_id = ? "
+            "  AND status = 1 "
+            "  AND seq < ? "
+            "ORDER BY m.seq DESC LIMIT 5",
+            conversation_id,
+            cursorSeq);
+    }
 
     if (!queryResult.succeeded || !queryResult.result)
     {
+        std::cerr << "查询历史消息失败\n";
         return {QueryHistoricalMessageStatus::Error};
     }
 
@@ -329,20 +355,25 @@ QueryHistoricalMessageResult MessageRepository::queryHistoricalMessage(const std
 
         while (queryResult.result->next())
         {
-            const auto seqValue = queryResult.result->getString(1);
-            const auto textValue = queryResult.result->getString(2);
-
             HistoricalMessage message;
 
-            message.seq = static_cast<std::uint64_t>(
-                std::stoull(seqValue.c_str()));
+            // 第一列：消息序号
+            message.seq = readUInt64(*queryResult.result, 1);
 
-            message.text = std::string(
-                textValue.c_str(),
-                textValue.length());
+            // 第二列: 消息内容
+            const auto textVal = queryResult.result->getString(2);
+            message.text = std::string(textVal.c_str(), textVal.length());
+
+            // 第三列:发送者ID
+            message.senderId = readUInt64(*queryResult.result, 3);
+
+            // 第四列:发送者用户名
+            const auto nameVal = queryResult.result->getString(4);
+            message.senderName = std::string(nameVal.c_str(), nameVal.length());
 
             contents.push_back(std::move(message));
         }
+
         if (contents.empty())
         {
             return {QueryHistoricalMessageStatus::NotFound};
@@ -351,12 +382,20 @@ QueryHistoricalMessageResult MessageRepository::queryHistoricalMessage(const std
         // 返回客户端之前反转，让消息按 seq 从小到大排列。
         std::reverse(contents.begin(), contents.end());
 
-        return {QueryHistoricalMessageStatus::Found,std::move(contents)};
+        return {QueryHistoricalMessageStatus::Found, std::move(contents)};
     }
     catch (sql::SQLException &e)
     {
         std::cerr << "查询历史消息失败: " << e.what()
                   << "，错误代码: " << e.getErrorCode() << '\n';
+        return {QueryHistoricalMessageStatus::Error};
+    }
+    catch (const std::exception &e)
+    {
+        // 例如读取数据库数值并转换成 uint64_t 时出现异常。
+        std::cerr << "处理历史消息结果时发生异常: "
+                  << e.what() << '\n';
+
         return {QueryHistoricalMessageStatus::Error};
     }
 }

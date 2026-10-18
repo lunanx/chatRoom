@@ -62,8 +62,12 @@ namespace
 
         for (const auto &p : contents)
         {
-            content.push_back({{protocolBody::SEQ, p.seq},
-                               {protocolBody::TEXT, p.text}});
+            content.push_back({
+                {protocolBody::SEQ, p.seq},
+                {protocolBody::USER_ID,p.senderId},
+                {protocolBody::USERNAME,p.senderName},
+                {protocolBody::TEXT, p.text},
+            });
         }
 
         const nlohmann::json response = {
@@ -203,19 +207,19 @@ protocolHeader::CommandType MessageService::MessageHistoryQuery(const std::strin
         return setResponse(responseBody, protocolHeader::CommandType::MESSAGE_HISTORY_FAILED, "seq 格式不正确");
     }
 
-    // 查询历史消息 
-    auto res = MessageRepository::queryHistoricalMessage(conversationId, seq,userId);
+    // 查询历史消息
+    auto res = MessageRepository::queryHistoricalMessage(conversationId, seq, userId);
     if (res.status == QueryHistoricalMessageStatus::Error)
     {
         return setResponse(responseBody, protocolHeader::CommandType::MESSAGE_HISTORY_FAILED, "服务器暂时无法处理历史消息查询请求，请稍后再试");
     }
-    else if(res.status == QueryHistoricalMessageStatus::Forbidden)
+    else if (res.status == QueryHistoricalMessageStatus::Forbidden)
     {
-        return setResponse(responseBody,protocolHeader::CommandType::MESSAGE_HISTORY_FAILED,"无权查询该会话的历史消息");
+        return setResponse(responseBody, protocolHeader::CommandType::MESSAGE_HISTORY_FAILED, "无权查询该会话的历史消息");
     }
     else if (res.status == QueryHistoricalMessageStatus::NotFound)
     {
-        return setResponse(responseBody, protocolHeader::CommandType::MESSAGE_HISTORY_SUCCESS, "暂无历史消息",std::vector<HistoricalMessage>{},0);
+        return setResponse(responseBody, protocolHeader::CommandType::MESSAGE_HISTORY_SUCCESS, "暂无历史消息", std::vector<HistoricalMessage>{}, 0);
     }
 
     const auto &contents = res.contents.value();
@@ -223,7 +227,7 @@ protocolHeader::CommandType MessageService::MessageHistoryQuery(const std::strin
     const std::uint64_t nextCursor = contents.front().seq;
     printf("查询历史消息成功\n");
 
-    return setResponse(responseBody, protocolHeader::CommandType::MESSAGE_HISTORY_SUCCESS, "查询历史消息成功", contents,nextCursor);
+    return setResponse(responseBody, protocolHeader::CommandType::MESSAGE_HISTORY_SUCCESS, "查询历史消息成功", contents, nextCursor);
 }
 
 bool MessageService::validateSendContentRequest(const std::string &body, nlohmann::json &data)

@@ -3,8 +3,23 @@
 find_package(Threads REQUIRED)
 
 # 尽早报告开发依赖缺失，避免编译到某个 .cpp 时才发现头文件或链接库不可用。
-find_path(MARIADB_CPP_INCLUDE_DIR NAMES mariadb/conncpp.hpp)
-find_library(MARIADB_CPP_LIBRARY NAMES mariadbcpp)
+# 项目内 MariaDB Connector/C++ 文件的根目录
+set(MARIADB_CPP_ROOT
+    "${CMAKE_CURRENT_SOURCE_DIR}/../resources/mariadb-connector-cpp"
+)
+# 优先查找项目内的头文件；未找到时继续查找系统安装路径
+find_path(MARIADB_CPP_INCLUDE_DIR
+    NAMES mariadb/conncpp.hpp
+    HINTS
+        "${MARIADB_CPP_ROOT}/include"
+)
+# 优先查找项目内的链接库；未找到时继续查找系统安装路径
+find_library(MARIADB_CPP_LIBRARY
+    NAMES mariadbcpp
+    HINTS
+        "${MARIADB_CPP_ROOT}/lib"
+        "${MARIADB_CPP_ROOT}/lib64"
+)
 find_path(SODIUM_INCLUDE_DIR NAMES sodium.h)
 find_library(SODIUM_LIBRARY NAMES sodium)
 
