@@ -197,7 +197,7 @@ protocolHeader::CommandType MessageService::MessageHistoryQuery(const std::strin
 
     // 检查 seq
     std::uint64_t seq = data[protocolBody::SEQ].get<std::uint64_t>();
-    if (!isValidConversationId(seq))
+    if (!isValidSeq(seq))
     {
         printf("当前seq序号校验不通过,查询历史消息失败\n");
         return setResponse(responseBody, protocolHeader::CommandType::MESSAGE_HISTORY_FAILED, "seq 格式不正确");

@@ -145,7 +145,7 @@ DispatchResult Dispatcher::dispatch(const protocolHeader::PacketFrame &frame, Cl
         {
             if (!session.isAuthenticated())
             {
-                responseCommand = unauthenticatedConversationFailure(frame.m_body);
+                responseCommand = protocolHeader::CommandType::MESSAGE_HISTORY_FAILED;
                 responseBody = makeResponseBody(responseCommand, "当前没有账号登录");
             }
             else
