@@ -272,7 +272,7 @@ QueryHistoricalMessageResult MessageRepository::queryHistoricalMessage(const std
     }
 
     auto queryResult = dbManager.query(
-        "SELECT content FROM Message WHERE conversation_id = ? AND seq < ? AND status = 1 AND ORDER BY DESC LIMIT 5",
+        "SELECT content FROM Message WHERE conversation_id = ? AND seq < ? AND status = 1 ORDER BY seq DESC LIMIT 5",
         conversation_id,
         cursorSeq);
 

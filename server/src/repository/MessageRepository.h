@@ -42,6 +42,8 @@ public:
 
     /*
         查询conversation_id下的历史消息，单次查询5个
+        seq = 0 表示获取最近的五条消息
+        seq > 0 表示获取序号严格小于seq的最近五条消息
     */
     static QueryHistoricalMessageResult queryHistoricalMessage(const std::uint64_t conversation_id, const std::uint64_t seq);
 };

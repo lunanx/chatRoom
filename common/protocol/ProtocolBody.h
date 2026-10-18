@@ -53,7 +53,11 @@ namespace protocolBody
     constexpr const char *LAST_SEQ = "last_seq";
 
     /*
-        历史消息分隔符号
+        历史消息相关
     */
     constexpr const char *HITSTORICALMESSAGESPLIT = "###";
+
+    constexpr const char *TEXT = "text";
+
+    constexpr const char *NEXT_CURSOR = "next_cursor";
 }
