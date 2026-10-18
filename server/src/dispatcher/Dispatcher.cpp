@@ -143,7 +143,16 @@ DispatchResult Dispatcher::dispatch(const protocolHeader::PacketFrame &frame, Cl
         }
         else if (command == protocolHeader::CommandType::MESSAGE_HISTORY_REQUEST)
         {
-            responseCommand = MessageService::MessageHistoryQuery(frame.m_body,responseBody);
+            if (!session.isAuthenticated())
+            {
+                responseCommand = unauthenticatedConversationFailure(frame.m_body);
+                responseBody = makeResponseBody(responseCommand, "当前没有账号登录");
+            }
+            else
+            {
+                const auto &user = session.getAuthenticatedUser();
+                responseCommand = MessageService::MessageHistoryQuery(frame.m_body, responseBody,user->userId);
+            }
         }
         else
         {
@@ -166,7 +175,7 @@ DispatchResult Dispatcher::dispatch(const protocolHeader::PacketFrame &frame, Cl
         responseCommand = failureCommandFor(command);
         responseBody = makeResponseBody(responseCommand, "服务器暂时无法处理请求，请稍后重试");
     }
-    
+
     dispatchResult.frame = protocolHeader::PacketFrame(static_cast<std::uint16_t>(responseCommand), responseBody, frame.m_requestId);
     return dispatchResult;
 }

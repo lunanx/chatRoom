@@ -37,7 +37,7 @@ public:
         认证用户身份由 Dispatcher 从 ClientSession 传入，
         body有需要查询历史消息的会话id、和从哪里开始查询的seq,一次查询5个
     */
-    static protocolHeader::CommandType MessageHistoryQuery(const std::string &body, std::string &responseBody);
+    static protocolHeader::CommandType MessageHistoryQuery(const std::string &body, std::string &responseBody, std::uint64_t userId);
 
 private:
     /*

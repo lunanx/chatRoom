@@ -71,7 +71,7 @@ namespace
         const nlohmann::json response = {
             {protocolBody::CODE, static_cast<std::uint16_t>(command)},
             {protocolBody::MESSAGE, message},
-            {protocolBody::CONTENT,content}};
+            {protocolBody::CONTENT, content}};
 
         responseBody = response.dump();
         return command;
@@ -178,11 +178,11 @@ MessageSendResult MessageService::sendContent(
     return {responseCommand, savedMessage, shouldBroadcast};
 }
 
-protocolHeader::CommandType MessageService::MessageHistoryQuery(const std::string &body, std::string &responseBody)
+protocolHeader::CommandType MessageService::MessageHistoryQuery(const std::string &body, std::string &responseBody, std::uint64_t userId)
 {
     nlohmann::json data;
     // 校验JSON、content、conversationId数据格式是否合格
-    if (!validateSendContentRequest(body, data))
+    if (!validateHistoricalMessageQueryRequest(body, data))
     {
         printf("数据类型校验不通过,查询历史消息失败\n");
         return setResponse(responseBody, protocolHeader::CommandType::MESSAGE_HISTORY_FAILED, "查询历史信息请求格式不正确");
@@ -214,7 +214,7 @@ protocolHeader::CommandType MessageService::MessageHistoryQuery(const std::strin
         return setResponse(responseBody, protocolHeader::CommandType::MESSAGE_HISTORY_SUCCESS, "暂无历史消息");
     }
     printf("查询历史消息成功\n");
-    return setResponse(responseBody,protocolHeader::CommandType::MESSAGE_HISTORY_SUCCESS,"查询历史消息成功",res.contents.value());
+    return setResponse(responseBody, protocolHeader::CommandType::MESSAGE_HISTORY_SUCCESS, "查询历史消息成功", res.contents.value());
 }
 
 bool MessageService::validateSendContentRequest(const std::string &body, nlohmann::json &data)
