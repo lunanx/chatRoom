@@ -76,6 +76,7 @@ target_include_directories(InternetChatRoomServer
         ${CMAKE_CURRENT_SOURCE_DIR}/../resources
         ${MARIADB_CPP_INCLUDE_DIR}
         ${SODIUM_INCLUDE_DIR}
+        
 )
 
 # 默认配置路径由 CMake 注入；环境变量 CHATROOM_DB_CONFIG / CHATROOM_SERVER_CONFIG 可在运行时覆盖。
