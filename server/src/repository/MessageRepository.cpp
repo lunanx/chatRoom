@@ -241,7 +241,7 @@ CreateMessageResult MessageRepository::createMessage(const Message &message)
             dbManager.rollbackTransaction();
             return {CreateMessageStatus::Failed, std::nullopt};
         }
-        // 返回一个完整的消息 
+        // 返回一个完整的消息
         Message savedMessage(
             message.getSenderId(), message.getSenderName(), message.getContent(),
             message.getConversationId(), serverMsgId, message.getClientMsgId(),
@@ -259,5 +259,47 @@ CreateMessageResult MessageRepository::createMessage(const Message &message)
         std::cerr << "保存消息时发生未知异常\n";
         dbManager.rollbackTransaction();
         return {CreateMessageStatus::Failed, std::nullopt};
+    }
+}
+
+QueryHistoricalMessageResult MessageRepository::queryHistoricalMessage(const std::uint64_t conversation_id, const std::uint64_t cursorSeq)
+{
+    DatabaseManager dbManager;
+    if (!dbManager.connect())
+    {
+        std::cerr << "数据库连接失败，查询历史消息\n";
+        return {QueryHistoricalMessageStatus::Error};
+    }
+
+    auto queryResult = dbManager.query(
+        "SELECT content FROM Message WHERE conversation_id = ? AND seq < ? AND status = 1 LIMIT 5",
+        conversation_id,
+        cursorSeq);
+
+    if (!queryResult.succeeded || !queryResult.result)
+    {
+        return {QueryHistoricalMessageStatus::Error};
+    }
+
+    try
+    {
+        std::array<std::string,5> contents;
+        int size = 0;
+        while(queryResult.result->next())
+        {
+            auto cont = queryResult.result->getString(protocolBody::CONTENT);
+            contents[size++] = std::string(cont.c_str(),cont.length());
+        }
+        if(size == 0)
+        {
+            return {QueryHistoricalMessageStatus::NotFound};
+        }
+        return {QueryHistoricalMessageStatus::Found,std::move(contents)};
+    }
+    catch (sql::SQLException &e)
+    {
+        std::cerr << "查询用户密码哈希失败: " << e.what()
+                  << "，错误代码: " << e.getErrorCode() << '\n';
+        return {QueryHistoricalMessageStatus::Error};
     }
 }

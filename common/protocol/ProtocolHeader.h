@@ -112,7 +112,13 @@ namespace protocolHeader
         */
         PRIVATECREATE_SUCCESS = 21,
         PRIVATECREATE_FAILED = 22,
-        
+
+        /*
+            历史消息请求
+        */
+        MESSAGE_HISTORY_REQUEST = 23,
+        MESSAGE_HISTORY_SUCCESS = 24,
+        MESSAGE_HISTORY_FAILED = 25
     };
 
     /*
@@ -161,12 +167,11 @@ namespace protocolHeader
     {
         PacketFrame() = default;
         PacketFrame(std::uint16_t command,
-            std::string body,
-            std::uint64_t requestId)
-            :m_command(command),
-             m_body(body),
-             m_requestId(requestId)
-        {};
+                    std::string body,
+                    std::uint64_t requestId)
+            : m_command(command),
+              m_body(body),
+              m_requestId(requestId) {};
         std::uint16_t m_command{0};
         std::string m_body;
         std::uint64_t m_requestId{0};

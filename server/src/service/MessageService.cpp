@@ -51,13 +51,36 @@ namespace
         responseBody = response.dump();
         return command;
     }
+    protocolHeader::CommandType setResponse(
+        std::string &responseBody,
+        protocolHeader::CommandType command,
+        const std::string &message,
+        const std::array<std::string, 5> &contents)
+    {
+        std::string content;
+        for (auto it = contents.begin(); it != contents.end(); it++)
+        {
+            if (it != contents.begin())
+            {
+                content += protocolBody::HITSTORICALMESSAGESPLIT;
+            }
+            content += *it;
+        }
 
+        auto size = contents.size();
+        const nlohmann::json response = {
+            {protocolBody::CODE, static_cast<std::uint16_t>(command)},
+            {protocolBody::MESSAGE, message},
+            {protocolBody::CONTENT,content}};
+
+        responseBody = response.dump();
+        return command;
+    }
     MessageSendResult failed(std::string &responseBody, const std::string &message)
     {
         return {setResponse(responseBody, protocolHeader::CommandType::MESSAGE_SEND_FAILED, message),
                 std::nullopt, false};
     }
-
 }
 
 MessageSendResult MessageService::sendContent(
@@ -92,8 +115,8 @@ MessageSendResult MessageService::sendContent(
     }
 
     // 检查client_msg_id
-    std::string& clientMsgId = data[protocolBody::CLIENT_MSG_ID].get_ref<std::string&>();
-    if(!isValidClientMsgId(clientMsgId))
+    const std::string &clientMsgId = data[protocolBody::CLIENT_MSG_ID].get_ref<std::string &>();
+    if (!isValidClientMsgId(clientMsgId))
     {
         printf("客户端唯一消息id校验不通过,消息发送失败\n");
         return failed(responseBody, "client_msg_id 不合法");
@@ -107,7 +130,6 @@ MessageSendResult MessageService::sendContent(
     }
 
     const auto type = static_cast<std::uint16_t>(typeValue);
-    const std::string clientMsgId = data[protocolBody::CLIENT_MSG_ID].get<std::string>();
 
     // 创建待保存的 Message；serverMsgId 和 seq 暂时未知，由 Repository 在数据库事务内补齐。
     Message pendingMessage(userId, username, content, conversationId, clientMsgId, type);
@@ -156,6 +178,45 @@ MessageSendResult MessageService::sendContent(
     return {responseCommand, savedMessage, shouldBroadcast};
 }
 
+protocolHeader::CommandType MessageService::MessageHistoryQuery(const std::string &body, std::string &responseBody)
+{
+    nlohmann::json data;
+    // 校验JSON、content、conversationId数据格式是否合格
+    if (!validateSendContentRequest(body, data))
+    {
+        printf("数据类型校验不通过,查询历史消息失败\n");
+        return setResponse(responseBody, protocolHeader::CommandType::MESSAGE_HISTORY_FAILED, "查询历史信息请求格式不正确");
+    }
+
+    // 检查conversation_id
+    std::uint64_t conversationId = data[protocolBody::CONVERSATION_ID].get<std::uint64_t>();
+    if (!isValidConversationId(conversationId))
+    {
+        printf("会话id校验不通过,查询历史消息失败\n");
+        return setResponse(responseBody, protocolHeader::CommandType::MESSAGE_HISTORY_FAILED, "conversation_id 格式不正确");
+    }
+
+    // 检查 seq
+    std::uint64_t seq = data[protocolBody::SEQ].get<std::uint64_t>();
+    if (!isValidConversationId(seq))
+    {
+        printf("当前seq序号校验不通过,查询历史消息失败\n");
+        return setResponse(responseBody, protocolHeader::CommandType::MESSAGE_HISTORY_FAILED, "seq 格式不正确");
+    }
+    // 查询数据库
+    auto res = MessageRepository::queryHistoricalMessage(conversationId, seq);
+    if (res.status == QueryHistoricalMessageStatus::Error)
+    {
+        return setResponse(responseBody, protocolHeader::CommandType::MESSAGE_HISTORY_FAILED, "服务器暂时无法处理历史消息查询请求，请稍后再试");
+    }
+    else if (res.status == QueryHistoricalMessageStatus::NotFound)
+    {
+        return setResponse(responseBody, protocolHeader::CommandType::MESSAGE_HISTORY_SUCCESS, "暂无历史消息");
+    }
+    printf("查询历史消息成功\n");
+    return setResponse(responseBody,protocolHeader::CommandType::MESSAGE_HISTORY_SUCCESS,"查询历史消息成功",res.contents.value());
+}
+
 bool MessageService::validateSendContentRequest(const std::string &body, nlohmann::json &data)
 {
     try
@@ -195,7 +256,42 @@ bool MessageService::validateSendContentRequest(const std::string &body, nlohman
 
     if (!data.contains(protocolBody::TYPE) || !isUnsignedInteger(data[protocolBody::TYPE]))
     {
-        std::cerr <<"last_seq 不存在或者不是非负整数\n";
+        std::cerr << "last_seq 不存在或者不是非负整数\n";
+        return false;
+    }
+
+    return true;
+}
+
+bool MessageService::validateHistoricalMessageQueryRequest(const std::string &body, nlohmann::json &data)
+{
+    try
+    {
+        data = nlohmann::json::parse(body);
+    }
+    catch (const nlohmann::json::parse_error &)
+    {
+        std::cerr << "消息 Body JSON 格式错误\n";
+        return false;
+    }
+
+    if (!data.is_object())
+    {
+        std::cerr << "JSON Body必须是对象\n";
+        return false;
+    }
+
+    if (!data.contains(protocolBody::CONVERSATION_ID) ||
+        !isUnsignedInteger(data[protocolBody::CONVERSATION_ID]))
+    {
+        std::cerr << "conversation_id 不存在或者不是非负整数\n";
+        return false;
+    }
+
+    if (!data.contains(protocolBody::SEQ) ||
+        !isUnsignedInteger(data[protocolBody::SEQ]))
+    {
+        std::cerr << "conversation_id 不存在或者不是非负整数\n";
         return false;
     }
 
@@ -209,10 +305,15 @@ bool MessageService::isValidContent(const std::string &content)
 
 bool MessageService::isValidConversationId(const std::uint64_t &conversationId)
 {
-    return true;
+    return conversationId > 0;
 }
 
 bool MessageService::isValidClientMsgId(const std::string &clientMsgId)
 {
     return !clientMsgId.empty() && clientMsgId.size() <= 64;
+}
+
+bool MessageService::isValidSeq(const std::uint64_t &seq)
+{
+    return seq > 0;
 }

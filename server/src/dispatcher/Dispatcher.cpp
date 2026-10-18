@@ -141,6 +141,10 @@ DispatchResult Dispatcher::dispatch(const protocolHeader::PacketFrame &frame, Cl
                 dispatchResult.lastSeq = result.lastSeq;
             }
         }
+        else if (command == protocolHeader::CommandType::MESSAGE_HISTORY_REQUEST)
+        {
+            responseCommand = MessageService::MessageHistoryQuery(frame.m_body,responseBody);
+        }
         else
         {
             // 未实现的命令也返回合法 JSON，避免客户端解析响应时遇到空白或非法内容。
