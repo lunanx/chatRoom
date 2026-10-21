@@ -19,6 +19,14 @@ namespace
         case protocolHeader::CommandType::GROUP_MESSAGE_SEND:
         case protocolHeader::CommandType::PRIVATE_MESSAGE_SEND:
             return protocolHeader::CommandType::MESSAGE_SEND_FAILED;
+        case protocolHeader::CommandType::FRIEND_REQUEST_SEND:
+            return protocolHeader::CommandType::FRIEND_REQUEST_SEND_FAILED;
+        case protocolHeader::CommandType::QUERY_PENDING_FRIEND_LIST_REQUEST:
+            return protocolHeader::CommandType::QUERY_PENDING_FRIEND_LIST_FAILED;
+        case protocolHeader::CommandType::FRIEND_REQUEST_HANDLE_REQUEST:
+            return protocolHeader::CommandType::FRIEND_REQUEST_HANDLE_FAILED;
+        case protocolHeader::CommandType::QUERY_FRIEND_LIST_REQUEST:
+            return protocolHeader::CommandType::QUERY_FRIEND_LIST_FAILED;
         default:
             return protocolHeader::CommandType::UNKNOWN;
         }
@@ -151,7 +159,65 @@ DispatchResult Dispatcher::dispatch(const protocolHeader::PacketFrame &frame, Cl
             else
             {
                 const auto &user = session.getAuthenticatedUser();
-                responseCommand = MessageService::MessageHistoryQuery(frame.m_body, responseBody,user->userId);
+                responseCommand = MessageService::MessageHistoryQuery(frame.m_body, responseBody, user->userId);
+            }
+        }
+        //好友请求--A->B
+        else if (command == protocolHeader::CommandType::FRIEND_REQUEST_SEND)
+        {
+            if (!session.isAuthenticated())
+            {
+                responseCommand = protocolHeader::CommandType::FRIEND_REQUEST_SEND_FAILED;
+                responseBody = makeResponseBody(responseCommand, "当前没有账号登录");
+            }
+            else
+            {
+                const auto &user = session.getAuthenticatedUser();
+                responseCommand = FriendService::sendFriendRequest(
+                    frame.m_body, responseBody, user->userId);
+            }
+        }
+        //查询好友请求列表--B->A
+        else if (command == protocolHeader::CommandType::QUERY_PENDING_FRIEND_LIST_REQUEST)
+        {
+            if (!session.isAuthenticated())
+            {
+                responseCommand = protocolHeader::CommandType::QUERY_PENDING_FRIEND_LIST_FAILED;
+                responseBody = makeResponseBody(responseCommand, "当前没有账号登录");
+            }
+            else
+            {
+                const auto &user = session.getAuthenticatedUser();
+                responseCommand = FriendService::listFriendRequests(responseBody, user->userId);
+            }
+        }
+        //处理好友请求--B->A
+        else if (command == protocolHeader::CommandType::FRIEND_REQUEST_HANDLE_REQUEST)
+        {
+            if (!session.isAuthenticated())
+            {
+                responseCommand = protocolHeader::CommandType::FRIEND_REQUEST_HANDLE_FAILED;
+                responseBody = makeResponseBody(responseCommand, "当前没有账号登录");
+            }
+            else
+            {
+                const auto &user = session.getAuthenticatedUser();
+                responseCommand = FriendService::handleFriendRequest(
+                    frame.m_body, responseBody, user->userId);
+            }
+        }
+        //查询好友列表
+        else if (command == protocolHeader::CommandType::QUERY_FRIEND_LIST_REQUEST)
+        {
+            if (!session.isAuthenticated())
+            {
+                responseCommand = protocolHeader::CommandType::QUERY_FRIEND_LIST_FAILED;
+                responseBody = makeResponseBody(responseCommand, "当前没有账号登录");
+            }
+            else
+            {
+                const auto &user = session.getAuthenticatedUser();
+                responseCommand = FriendService::listFriends(responseBody, user->userId);
             }
         }
         else

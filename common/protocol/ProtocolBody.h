@@ -56,6 +56,14 @@ namespace protocolBody
         历史消息相关
     */
     constexpr const char *TEXT = "text";
-
     constexpr const char *NEXT_CURSOR = "next_cursor";
+
+    /*
+    好友功能相关
+    */
+    constexpr const char *TARGET_USERNAME = "target_username";     // 发送好友申请的目标用户名
+    constexpr const char *FRIEND_REQUEST_ID = "friend_request_id"; // FriendRequest 表中的申请 ID
+    constexpr const char *ACTION = "action";                       // 1=同意，2=拒绝
+    constexpr const char *STATUS = "status";                       // 申请状态：0=待处理，1=已同意，2=已拒绝
+    constexpr const char *CREATED_AT = "created_at";               // 数据库的FriendList.create_at字段
 }

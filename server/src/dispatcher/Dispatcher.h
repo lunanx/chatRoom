@@ -4,6 +4,7 @@
 #include "service/UserService.h"
 #include "service/MessageService.h"
 #include "service/ConversationService.h"
+#include "service/FriendService.h"
 #include "net/ClientSession.h"
 #include <optional>
 

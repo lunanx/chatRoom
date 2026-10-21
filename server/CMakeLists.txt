@@ -68,6 +68,8 @@ add_executable(InternetChatRoomServer
 
     src/repository/UserRepository.cpp
     src/repository/UserRepository.h
+    src/repository/FriendRepository.cpp
+    src/repository/FriendRepository.h
     src/repository/MessageRepository.cpp
     src/repository/MessageRepository.h
     src/repository/ConversationRepository.cpp

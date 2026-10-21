@@ -65,6 +65,22 @@ namespace
         CHECK(frame.m_body == body);
     }
 
+    void testFriendCommandCodeValues()
+    {
+        CHECK(static_cast<std::uint16_t>(protocolHeader::CommandType::FRIEND_REQUEST_SEND) == 26);
+        CHECK(static_cast<std::uint16_t>(protocolHeader::CommandType::FRIEND_REQUEST_SEND_SUCCESS) == 27);
+        CHECK(static_cast<std::uint16_t>(protocolHeader::CommandType::FRIEND_REQUEST_SEND_FAILED) == 28);
+        CHECK(static_cast<std::uint16_t>(protocolHeader::CommandType::QUERY_PENDING_FRIEND_LIST_REQUEST) == 29);
+        CHECK(static_cast<std::uint16_t>(protocolHeader::CommandType::QUERY_PENDING_FRIEND_LIST_SUCCESS) == 30);
+        CHECK(static_cast<std::uint16_t>(protocolHeader::CommandType::QUERY_PENDING_FRIEND_LIST_FAILED) == 31);
+        CHECK(static_cast<std::uint16_t>(protocolHeader::CommandType::FRIEND_REQUEST_HANDLE_REQUEST) == 32);
+        CHECK(static_cast<std::uint16_t>(protocolHeader::CommandType::FRIEND_REQUEST_HANDLE_SUCCESS) == 33);
+        CHECK(static_cast<std::uint16_t>(protocolHeader::CommandType::FRIEND_REQUEST_HANDLE_FAILED) == 34);
+        CHECK(static_cast<std::uint16_t>(protocolHeader::CommandType::QUERY_FRIEND_LIST_REQUEST) == 35);
+        CHECK(static_cast<std::uint16_t>(protocolHeader::CommandType::QUERY_FRIEND_LIST_SUCCESS) == 36);
+        CHECK(static_cast<std::uint16_t>(protocolHeader::CommandType::QUERY_FRIEND_LIST_FAILED) == 37);
+    }
+
     void testEncoderDecoderRoundTrip()
     {
         FrameEncoder encoder;
@@ -394,6 +410,7 @@ int main()
 {
     try
     {
+        runTest("FriendCommandCodeValues", testFriendCommandCodeValues);
         runTest("EncoderDecoderRoundTrip", testEncoderDecoderRoundTrip);
         runTest("NeedMoreData_PartialHeader", testNeedMoreDataForPartialHeader);
         runTest("NeedMoreData_PartialBody", testNeedMoreDataForPartialBody);

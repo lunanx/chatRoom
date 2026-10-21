@@ -118,9 +118,36 @@ namespace protocolHeader
         */
         MESSAGE_HISTORY_REQUEST = 23,
         MESSAGE_HISTORY_SUCCESS = 24,
-        MESSAGE_HISTORY_FAILED = 25
-    };
+        MESSAGE_HISTORY_FAILED = 25,
 
+        /*
+            好友申请发送-- A->B
+        */
+        FRIEND_REQUEST_SEND = 26,
+        FRIEND_REQUEST_SEND_SUCCESS = 27,
+        FRIEND_REQUEST_SEND_FAILED = 28,
+
+        /*
+            查询当前用户收到的待处理好友申请-- B->A
+        */
+        QUERY_PENDING_FRIEND_LIST_REQUEST = 29,
+        QUERY_PENDING_FRIEND_LIST_SUCCESS = 30,
+        QUERY_PENDING_FRIEND_LIST_FAILED = 31,
+
+        /*
+            同意或拒绝好友申请-- B-->A
+        */
+        FRIEND_REQUEST_HANDLE_REQUEST = 32,
+        FRIEND_REQUEST_HANDLE_SUCCESS = 33,
+        FRIEND_REQUEST_HANDLE_FAILED = 34,
+
+        /*
+            查询当前用户的好友列表
+        */
+        QUERY_FRIEND_LIST_REQUEST = 35,
+        QUERY_FRIEND_LIST_SUCCESS = 36,
+        QUERY_FRIEND_LIST_FAILED = 37
+    };
     /*
        单个Body允许的最大长度
 
