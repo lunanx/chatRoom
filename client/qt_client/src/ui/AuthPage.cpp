@@ -5,6 +5,7 @@
 #include <QFile>
 #include <QGraphicsDropShadowEffect>
 #include <QHBoxLayout>
+#include <QGridLayout>
 #include <QLabel>
 #include <QLineEdit>
 #include <QPushButton>
@@ -122,9 +123,10 @@ AuthPage::AuthPage(QWidget *parent)
     // 页面最小尺寸交给 LoginWindow 控制，方便欢迎页缩小到 400 × 500。
     setMinimumSize(0, 0);
 
-    // 页面外层留白，卡片在可用区域中居中。
-    auto *pageLayout = new QVBoxLayout(this);
-    pageLayout->setContentsMargins(18, 12, 18, 18);
+    // 卡片直接铺满窗口内部，只留少量空间显示圆角，不再出现外框。
+    // 使用网格布局，让窗口控制按钮浮在卡片右上角，不额外占用表单空间。
+    auto *pageLayout = new QGridLayout(this);
+    pageLayout->setContentsMargins(6, 6, 6, 6);
     pageLayout->setSizeConstraint(QLayout::SetNoConstraint);
     pageLayout->setSpacing(0);
 
@@ -132,17 +134,20 @@ AuthPage::AuthPage(QWidget *parent)
     auto *windowControls = new QWidget(this);
     auto *controlsLayout = new QHBoxLayout(windowControls);
     controlsLayout->setContentsMargins(0, 0, 0, 0);
-    controlsLayout->setSpacing(8);
+    controlsLayout->setSpacing(4);
     const auto makeControl = [windowControls](const QString &text, const QString &name)
     {
         auto *button = new QPushButton(text, windowControls);
         button->setObjectName(name);
-        button->setFixedSize(30, 30);
+        button->setFixedSize(22, 22);
         button->setCursor(Qt::PointingHandCursor);
+        // 控制按钮直接融入右侧页面背景，不再使用白色圆形底和外边框。
+        // 只有悬停时才显示很淡的背景反馈，避免破坏整体卡片效果。
         button->setStyleSheet(QStringLiteral(
-            "QPushButton { color: #625A7D; background: rgba(255,255,255,180); "
-            "border: 1px solid rgba(109,88,172,45); border-radius: 15px; font-size: 15px; }"
-            "QPushButton:hover { background: #E9E3FF; }"));
+            "QPushButton { color: #625A7D; background: transparent; "
+            "border: none; border-radius: 11px; font-size: 12px; padding: 0; }"
+            "QPushButton:hover { background: rgba(106,83,246,18); }"
+            "QPushButton:pressed { background: rgba(106,83,246,30); }"));
         return button;
     };
     auto *minButton = makeControl(QStringLiteral("−"), QStringLiteral("windowMinButton"));
@@ -152,7 +157,6 @@ AuthPage::AuthPage(QWidget *parent)
     controlsLayout->addWidget(minButton);
     controlsLayout->addWidget(maxButton);
     controlsLayout->addWidget(closeButton);
-    pageLayout->addWidget(windowControls, 0, Qt::AlignRight | Qt::AlignTop);
 
     connect(minButton, &QPushButton::clicked, this, [this]() { window()->showMinimized(); });
     connect(maxButton, &QPushButton::clicked, this, [this]()
@@ -161,9 +165,6 @@ AuthPage::AuthPage(QWidget *parent)
         else window()->showMaximized();
     });
     connect(closeButton, &QPushButton::clicked, this, [this]() { window()->close(); });
-
-    // 让卡片在控制按钮下方的剩余区域内居中。
-    pageLayout->addStretch(1);
 
     auto *card = new QWidget(this);
     card->setObjectName(QStringLiteral("authCard"));
@@ -329,8 +330,13 @@ AuthPage::AuthPage(QWidget *parent)
     cardLayout->addWidget(brandPanel, 43);
     cardLayout->addWidget(formPanel, 57);
     formPanelLayout->addWidget(form);
-    pageLayout->addWidget(card, 0, Qt::AlignCenter);
-    pageLayout->addStretch(1);
+
+    // 卡片铺满页面；控制按钮覆盖在右上角，靠右留出 10px 内边距。
+    pageLayout->addWidget(card, 0, 0);
+    pageLayout->addWidget(windowControls, 0, 0, Qt::AlignRight | Qt::AlignTop);
+    pageLayout->setAlignment(windowControls, Qt::AlignRight | Qt::AlignTop);
+    windowControls->raise();
+    windowControls->setContentsMargins(0, 2, 4, 0);
 
     connect(m_loginButton, &QPushButton::clicked,
             this, [this]()

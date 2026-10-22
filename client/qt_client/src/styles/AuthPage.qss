@@ -1,12 +1,12 @@
 /* 登录 / 注册页面。品牌区渐变和圆环由 AuthBrandPanel 的 QPainter 绘制。 */
 QWidget#authPage {
-    background-color: #F5F5FA;
+    background-color: transparent;
     color: #302A48;
 }
 
 QWidget#authCard {
     background-color: #FCFBFF;
-    border: 1px solid rgba(109, 88, 172, 41);
+    border: none;
     border-radius: 32px;
 }
 

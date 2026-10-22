@@ -15,6 +15,8 @@ LoginWindow::LoginWindow(QWidget *parent)
     setWindowTitle(QStringLiteral("Go聊"));
     // 去掉系统标题栏，窗口按钮由欢迎页/登录注册页自己显示。
     setWindowFlags(Qt::Window | Qt::FramelessWindowHint);
+    // 允许窗口四角透明，显示页面自身的圆角，而不是系统窗口边框。
+    setAttribute(Qt::WA_TranslucentBackground, true);
     // 欢迎页采用紧凑尺寸；进入登录/注册页后再调整到表单所需大小。
     setMinimumSize(0, 0);
     resize(400, 500);
