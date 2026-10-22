@@ -1,52 +1,54 @@
 #include "MainWindow.h"
 
 #include "Theme.h"
+#include "ui/ChatArea.h"
+#include "ui/SessionListPanel.h"
+#include "ui/SideBar.h"
 
 #include <QEvent>
 #include <QFont>
 #include <QFrame>
+#include <QHBoxLayout>
 #include <QLabel>
 #include <QMouseEvent>
 #include <QPainter>
 #include <QPainterPath>
 #include <QRadialGradient>
+#include <QSplitter>
 #include <QStackedWidget>
 #include <QVBoxLayout>
 #include <QWidget>
 
-// 初始化窗口属性、页面容器，并先放入三个可运行的占位页面。
+// 初始化无边框窗口和三个页面：欢迎页、登录页、聊天工作台。
 MainWindow::MainWindow(QWidget *parent)
     : QMainWindow(parent),
       m_pages(new QStackedWidget(this))
 {
-    // 隐藏操作系统自带标题栏，后续由我们自己绘制窗口控制按钮。
     setWindowTitle(QStringLiteral("Go聊"));
     setWindowFlags(Qt::Window | Qt::FramelessWindowHint);
     setAttribute(Qt::WA_TranslucentBackground, false);
     setMinimumSize(Theme::WindowMinimumWidth, Theme::WindowMinimumHeight);
     resize(1280, 800);
 
-    // 窗口与中央页面保持透明，让 MainWindow::paintEvent 绘制紫灰光晕背景。
+    // 页面栈背景保持透明，让 paintEvent 统一绘制窗口的紫灰渐变光晕。
     m_pages->setObjectName(QStringLiteral("pageStack"));
     m_pages->installEventFilter(this);
     m_pages->setFrameShape(QFrame::NoFrame);
     m_pages->setAttribute(Qt::WA_TranslucentBackground);
-    m_pages->setStyleSheet(QStringLiteral("QStackedWidget#pageStack { background: transparent; border: none; }"));
+    m_pages->setStyleSheet(QStringLiteral(
+        "QStackedWidget#pageStack { background: transparent; border: none; }"));
     setCentralWidget(m_pages);
 
-    // 基础阶段先创建三个独立占位页，后续逐页替换成真实 UI。
     QWidget *welcomePage = createPlaceholderPage(
         QStringLiteral("Go聊"),
         QStringLiteral("说 Go 就 Go · 欢迎页占位"));
     QWidget *authPage = createPlaceholderPage(
         QStringLiteral("登录 / 注册"),
-        QStringLiteral("账号与密码表单将在下一阶段实现"));
-    QWidget *chatPage = createPlaceholderPage(
-        QStringLiteral("聊天工作台"),
-        QStringLiteral("导航栏、会话列表与聊天区域将在下一阶段实现"));
+        QStringLiteral("账号与密码表单将在后续阶段实现"));
+    QWidget *chatPage = createChatWorkspacePage();
 
-    // 页面空白区域也支持拖动无边框窗口。后续加入按钮、输入框后，
-    // 交互控件本身不应安装这个事件过滤器，避免拖动与点击冲突。
+    // 页面空白边缘区域支持拖动无边框窗口。交互控件本身不安装此过滤器，
+    // 避免按钮点击、输入文字或拖动分隔条时误触发窗口拖动。
     welcomePage->installEventFilter(this);
     authPage->installEventFilter(this);
     chatPage->installEventFilter(this);
@@ -54,27 +56,26 @@ MainWindow::MainWindow(QWidget *parent)
     m_pages->addWidget(welcomePage);
     m_pages->addWidget(authPage);
     m_pages->addWidget(chatPage);
-    m_pages->setCurrentWidget(welcomePage);
+
+    // 当前先直接进入聊天工作台，方便集中检查三栏组合效果。
+    // 欢迎页和登录页仍保留在页面栈中，后续可增加页面切换逻辑。
+    m_pages->setCurrentWidget(chatPage);
 }
 
-// 创建一个垂直居中的简单页面：品牌标记、标题和说明文字。
-// 这里先用占位内容验证窗口骨架，后续会替换为最终设计稿中的真实控件。
+// 创建一个垂直居中的简单占位页面，供欢迎页和登录页暂时使用。
 QWidget *MainWindow::createPlaceholderPage(const QString &title,
                                            const QString &description,
                                            QWidget *parent)
 {
-    // page 是本页面所有控件的父对象；页面销毁时，子控件会由 Qt 自动释放。
     auto *page = new QWidget(parent);
     page->setAttribute(Qt::WA_TranslucentBackground);
     page->setStyleSheet(QStringLiteral("background: transparent;"));
 
-    // QVBoxLayout 按垂直方向排列子控件；上下 stretch 将内容推到页面中间。
     auto *layout = new QVBoxLayout(page);
     layout->setContentsMargins(48, 48, 48, 48);
     layout->setSpacing(14);
     layout->addStretch(1);
 
-    // 临时品牌标记使用 CSS 渐变，颜色与 HTML 设计稿的品牌渐变保持一致。
     auto *brand = new QLabel(QStringLiteral("G"), page);
     brand->setAlignment(Qt::AlignCenter);
     brand->setFixedSize(72, 72);
@@ -82,11 +83,6 @@ QWidget *MainWindow::createPlaceholderPage(const QString &title,
         "QLabel { color: white; background: qlineargradient(x1:0,y1:0,x2:1,y2:1,"
         "stop:0 #806BFF, stop:0.52 #6A53F6, stop:1 #927BFF);"
         "border-radius: 25px; font-size: 38px; font-weight: 900; }"));
-
-    auto *brandRow = new QWidget(page);
-    auto *brandLayout = new QVBoxLayout(brandRow);
-    brandLayout->setContentsMargins(0, 0, 0, 0);
-    brandLayout->addWidget(brand, 0, Qt::AlignHCenter);
 
     auto *titleLabel = new QLabel(title, page);
     titleLabel->setAlignment(Qt::AlignCenter);
@@ -100,28 +96,84 @@ QWidget *MainWindow::createPlaceholderPage(const QString &title,
     auto *descriptionLabel = new QLabel(description, page);
     descriptionLabel->setAlignment(Qt::AlignCenter);
     descriptionLabel->setWordWrap(true);
-    descriptionLabel->setStyleSheet(QStringLiteral("color: #77708F; font-size: 13px; background: transparent;"));
+    descriptionLabel->setStyleSheet(QStringLiteral(
+        "color: #77708F; font-size: 13px; background: transparent;"));
 
-    layout->addWidget(brandRow);
+    layout->addWidget(brand, 0, Qt::AlignHCenter);
     layout->addWidget(titleLabel);
     layout->addWidget(descriptionLabel);
     layout->addStretch(1);
+    return page;
+}
+
+// 将三个已实现的组件组合成工作台：导航栏 | 会话列表 | 当前聊天区域。
+QWidget *MainWindow::createChatWorkspacePage()
+{
+    auto *page = new QWidget;
+    page->setObjectName(QStringLiteral("chatWorkspacePage"));
+    page->setAttribute(Qt::WA_TranslucentBackground);
+    page->setStyleSheet(QStringLiteral("QWidget#chatWorkspacePage { background: transparent; }"));
+
+    // QSplitter 允许用户拖动会话列表与聊天区之间的分隔条。
+    auto *splitter = new QSplitter(Qt::Horizontal, page);
+    splitter->setObjectName(QStringLiteral("chatWorkspaceSplitter"));
+    splitter->setChildrenCollapsible(false);
+    splitter->setHandleWidth(8);
+    splitter->setOpaqueResize(true);
+
+    auto *sideBar = new SideBar(splitter);
+    sideBar->setFixedWidth(Theme::NavigationWidth);
+
+    auto *sessionPanel = new SessionListPanel(splitter);
+    // SessionListPanel 自己设置了 220–340px 的宽度范围；这里给它 240px 初始宽度。
+    sessionPanel->resize(Theme::ConversationWidth, sessionPanel->height());
+
+    auto *chatArea = new ChatArea(splitter);
+    chatArea->setConversationInfo(QStringLiteral("林间风"), QStringLiteral("林"), true);
+
+    splitter->addWidget(sideBar);
+    splitter->addWidget(sessionPanel);
+    splitter->addWidget(chatArea);
+    splitter->setStretchFactor(0, 0); // 导航栏固定宽度。
+    splitter->setStretchFactor(1, 0); // 会话列表可拖动，但不主动抢占剩余空间。
+    splitter->setStretchFactor(2, 1); // 窗口剩余宽度优先交给聊天区域。
+    splitter->setSizes({Theme::NavigationWidth, Theme::ConversationWidth, 900});
+
+    // 用外边距和间隔把三个区域分开，保留紫灰主题的呼吸感。
+    auto *layout = new QHBoxLayout(page);
+    layout->setContentsMargins(16, 16, 16, 16);
+    layout->setSpacing(0);
+    layout->addWidget(splitter);
+
+    // 点击会话时，把会话模型里的名字和头像文字同步到聊天区 Header。
+    // 这里仅联动演示数据，不代表已经连接服务器或加载了真实消息。
+    connect(sessionPanel, &SessionListPanel::sessionActivated, this,
+            [sessionPanel, chatArea](const QString &sessionId)
+    {
+        const SessionListModel *model = sessionPanel->sessionModel();
+        for (int row = 0; row < model->rowCount(); ++row)
+        {
+            const SessionItem *session = model->sessionAt(row);
+            if (session != nullptr && session->id == sessionId)
+            {
+                chatArea->setConversationInfo(session->name, session->avatarText, true);
+                break;
+            }
+        }
+    });
 
     return page;
 }
 
-// Qt 在窗口需要重绘时调用此函数。这里直接绘制背景，不创建额外背景控件。
+// Qt 在窗口需要重绘时调用此函数，绘制设计稿中的紫灰背景光晕。
 void MainWindow::paintEvent(QPaintEvent *event)
 {
     Q_UNUSED(event);
 
     QPainter painter(this);
     painter.setRenderHint(QPainter::Antialiasing, true);
-
-    // 用两个径向渐变模拟 HTML 的 --canvas-gradient。
     painter.fillRect(rect(), Theme::Page);
 
-    // 左上方的柔和紫色光晕：中心颜色较明显，向外逐渐透明。
     QRadialGradient topGlow(QPointF(width() * 0.14, height() * 0.10),
                             qMax(width(), height()) * 0.48);
     topGlow.setColorAt(0.0, Theme::PurpleHalo);
@@ -129,7 +181,6 @@ void MainWindow::paintEvent(QPaintEvent *event)
     topGlow.setColorAt(1.0, QColor(174, 159, 255, 0));
     painter.fillRect(rect(), topGlow);
 
-    // 右下方叠加第二层淡光晕，形成设计稿中的轻微层次感。
     QRadialGradient bottomGlow(QPointF(width() * 0.90, height() * 0.82),
                                qMax(width(), height()) * 0.42);
     bottomGlow.setColorAt(0.0, Theme::PurpleHaloSoft);
@@ -138,22 +189,20 @@ void MainWindow::paintEvent(QPaintEvent *event)
     painter.fillRect(rect(), bottomGlow);
 }
 
-// 鼠标左键按下时记录鼠标与窗口左上角的距离，供后续移动计算使用。
+// 直接在主窗口空白区域按下左键时，记录鼠标与窗口左上角的偏移量。
 void MainWindow::mousePressEvent(QMouseEvent *event)
 {
     if (event->button() == Qt::LeftButton)
     {
         m_dragging = true;
-        // 使用屏幕全局坐标计算偏移量，窗口移动时鼠标不会突然跳到窗口角落。
         m_dragOffset = event->globalPosition().toPoint() - frameGeometry().topLeft();
         event->accept();
         return;
     }
-
     QMainWindow::mousePressEvent(event);
 }
 
-// 只有左键仍按住时才移动窗口；普通鼠标移动不会改变窗口位置。
+// 左键按住移动鼠标时移动整个无边框窗口。
 void MainWindow::mouseMoveEvent(QMouseEvent *event)
 {
     if (m_dragging && (event->buttons() & Qt::LeftButton))
@@ -162,11 +211,10 @@ void MainWindow::mouseMoveEvent(QMouseEvent *event)
         event->accept();
         return;
     }
-
     QMainWindow::mouseMoveEvent(event);
 }
 
-// 左键松开后结束拖动状态，避免后续鼠标移动继续带动窗口。
+// 左键松开后结束拖动状态。
 void MainWindow::mouseReleaseEvent(QMouseEvent *event)
 {
     if (event->button() == Qt::LeftButton)
@@ -175,17 +223,12 @@ void MainWindow::mouseReleaseEvent(QMouseEvent *event)
         event->accept();
         return;
     }
-
     QMainWindow::mouseReleaseEvent(event);
 }
 
-
-// 页面上的鼠标事件通常先发给页面，而不是主窗口，因此在这里补充拖动处理。
-// 当前仅给页面容器和占位页面安装过滤器；添加按钮、输入框后，不要把过滤器
-// 安装到这些交互控件上，否则按下控件时可能被误认为是在拖动窗口。
+// 让页面栈和页面空白处也能拖动窗口；控件内部的点击交互仍由控件自己处理。
 bool MainWindow::eventFilter(QObject *watched, QEvent *event)
 {
-    // 只处理页面容器或当前显示的页面，其他对象的事件交回 Qt 默认处理。
     if (watched == m_pages || watched == m_pages->currentWidget())
     {
         if (event->type() == QEvent::MouseButtonPress)
@@ -217,6 +260,5 @@ bool MainWindow::eventFilter(QObject *watched, QEvent *event)
             }
         }
     }
-
     return QMainWindow::eventFilter(watched, event);
 }
