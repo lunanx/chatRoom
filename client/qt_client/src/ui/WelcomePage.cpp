@@ -5,6 +5,7 @@
 #include <QPaintEvent>
 #include <QPainter>
 #include <QPushButton>
+#include <QHBoxLayout>
 #include <QVBoxLayout>
 
 namespace
@@ -25,13 +26,48 @@ WelcomePage::WelcomePage(QWidget *parent)
 {
     setObjectName(QStringLiteral("welcomePage"));
     setAttribute(Qt::WA_StyledBackground, true);
-    setMinimumSize(480, 420);
+    // 欢迎窗口需要保持紧凑的 400 × 500 尺寸。
+    setMinimumSize(0, 0);
 
     // 中央内容纵向排列，所有元素水平居中。
     auto *rootLayout = new QVBoxLayout(this);
-    rootLayout->setContentsMargins(24, 34, 24, 34);
+    rootLayout->setContentsMargins(18, 12, 24, 24);
+    rootLayout->setSizeConstraint(QLayout::SetNoConstraint);
     rootLayout->setSpacing(0);
-    rootLayout->setAlignment(Qt::AlignCenter);
+
+    // 仅保留窗口控制按钮，不再显示独立的顶部导航栏/标题栏。
+    auto *windowControls = new QWidget(this);
+    auto *controlsLayout = new QHBoxLayout(windowControls);
+    controlsLayout->setContentsMargins(0, 0, 0, 0);
+    controlsLayout->setSpacing(8);
+    const auto makeControl = [this, windowControls](const QString &text, const QString &name)
+    {
+        auto *button = new QPushButton(text, windowControls);
+        button->setObjectName(name);
+        button->setFixedSize(30, 30);
+        button->setCursor(Qt::PointingHandCursor);
+        button->setStyleSheet(QStringLiteral(
+            "QPushButton { color: #625A7D; background: rgba(255,255,255,180); "
+            "border: 1px solid rgba(109,88,172,45); border-radius: 15px; font-size: 15px; }"
+            "QPushButton:hover { background: #E9E3FF; }"));
+        return button;
+    };
+    auto *minButton = makeControl(QStringLiteral("−"), QStringLiteral("windowMinButton"));
+    auto *maxButton = makeControl(QStringLiteral("□"), QStringLiteral("windowMaxButton"));
+    auto *closeButton = makeControl(QStringLiteral("×"), QStringLiteral("windowCloseButton"));
+    controlsLayout->addStretch(1);
+    controlsLayout->addWidget(minButton);
+    controlsLayout->addWidget(maxButton);
+    controlsLayout->addWidget(closeButton);
+    rootLayout->addWidget(windowControls, 0, Qt::AlignRight | Qt::AlignTop);
+
+    connect(minButton, &QPushButton::clicked, this, [this]() { window()->showMinimized(); });
+    connect(maxButton, &QPushButton::clicked, this, [this]()
+    {
+        if (window()->isMaximized()) window()->showNormal();
+        else window()->showMaximized();
+    });
+    connect(closeButton, &QPushButton::clicked, this, [this]() { window()->close(); });
 
     auto *logo = new QLabel(QStringLiteral("G"), this);
     logo->setObjectName(QStringLiteral("welcomeMark"));

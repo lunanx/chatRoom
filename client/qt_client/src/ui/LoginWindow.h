@@ -1,7 +1,10 @@
 #pragma once
 
 #include <QMainWindow>
+#include <QPoint>
 
+class QEvent;
+class QMouseEvent;
 class QStackedWidget;
 class WelcomePage;
 class AuthPage;
@@ -13,6 +16,9 @@ class LoginWindow : public QMainWindow
 
 public:
     explicit LoginWindow(QWidget *parent = nullptr);
+
+protected:
+    bool eventFilter(QObject *watched, QEvent *event) override;
 
 public slots:
     // 只有在登录业务确认成功后，外部才能调用这个函数。
@@ -34,4 +40,6 @@ private:
     QStackedWidget *m_pageStack = nullptr;
     WelcomePage *m_welcomePage = nullptr;
     AuthPage *m_authPage = nullptr;
+    bool m_dragging = false;
+    QPoint m_dragOffset;
 };
