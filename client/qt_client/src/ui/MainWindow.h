@@ -11,8 +11,6 @@ class QMouseEvent;
 class QPaintEvent;
 class QResizeEvent;
 class QStackedWidget;
-class WelcomePage;
-class AuthPage;
 class QWidget;
 
 // 客户端主窗口：管理欢迎页、登录页和聊天工作台三个页面。
@@ -35,10 +33,6 @@ protected:
     bool eventFilter(QObject *watched, QEvent *event) override;
 
 private:
-    // 创建暂时还未实现的欢迎页和登录页。
-    QWidget *createPlaceholderPage(const QString &title,
-                                   const QString &description,
-                                   QWidget *parent = nullptr);
     // 将 SideBar、SessionListPanel、ChatArea 组合为完整聊天工作台。
     QWidget *createChatWorkspacePage();
     // 给页面及其子控件安装事件过滤器，使鼠标拖到窗口边缘时也能缩放。
@@ -49,8 +43,6 @@ private:
     void updateResizeCursor(QWidget *watched, const QPoint &globalPosition);
 
     QStackedWidget *m_pageStack = nullptr; // 页面栈，只显示当前页面。
-    WelcomePage *m_welcomePage = nullptr;
-    AuthPage *m_authPage = nullptr;
     QPoint m_dragOffset;              // 鼠标按下位置相对窗口左上角的偏移量。
     bool m_dragging = false;          // 当前是否正在拖动窗口。
     bool m_resizing = false;          // 当前是否正在拖动窗口边缘缩放。

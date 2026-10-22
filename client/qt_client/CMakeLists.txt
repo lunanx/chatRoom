@@ -55,14 +55,15 @@ add_executable(ChatRoomClient
     src/ui/ChatArea.qrc
     src/ui/MessageBubble.h
     src/ui/MessageBubble.cpp
-    src/ui/WelcomePage.h
     
-    # 欢迎和登录/注册界面,以及对应的QSS资源
+    # 欢迎和登录/注册界面及其 QSS 资源
     src/ui/WelcomePage.h
     src/ui/WelcomePage.cpp
     src/ui/AuthPage.h
     src/ui/AuthPage.cpp
     resources/pages.qrc
+    src/ui/LoginWindow.h
+    src/ui/LoginWindow.cpp
 )
 
 # 引用项目公共协议定义和已有的第三方头文件

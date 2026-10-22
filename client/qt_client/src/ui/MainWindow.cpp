@@ -1,8 +1,6 @@
 #include "MainWindow.h"
 
 #include "Theme.h"
-#include "ui/WelcomePage.h"
-#include "ui/AuthPage.h"
 #include "ui/ChatArea.h"
 #include "ui/SessionListPanel.h"
 #include "ui/SideBar.h"
@@ -44,104 +42,20 @@ MainWindow::MainWindow(QWidget *parent)
     m_pageStack->setStyleSheet(QStringLiteral(
         "QStackedWidget#pageStack { background: transparent; border: none; }"));
 
-    // 欢迎页面和登录/注册页面
-    m_welcomePage = new WelcomePage(m_pageStack);
-    m_authPage = new AuthPage(m_pageStack);
-
-    m_pageStack->addWidget(m_welcomePage); // index 0：欢迎页
-    m_pageStack->addWidget(m_authPage);    // index 1：登录 / 注册页
-    m_pageStack->setCurrentWidget(m_welcomePage);
-    setCentralWidget(m_pageStack);
-
-    connect(m_welcomePage, &WelcomePage::enterRequested,
-            this, [this]()
-            {
-    m_pageStack->setCurrentWidget(m_authPage);
-    m_authPage->focusAccountInput(); });
-
-    // 登录和注册按钮目前只发出信号；后续在 MainWindow 或 Controller 中连接到业务逻辑。
-    connect(m_authPage, &AuthPage::loginRequested,
-            this, [this](const QString &account, const QString &password, bool rememberMe)
-            {
-                Q_UNUSED(account);
-                Q_UNUSED(password);
-                Q_UNUSED(rememberMe);
-                // 下一阶段在这里调用登录 Controller。
-            });
-
-    connect(m_authPage, &AuthPage::registerRequested,
-            this, [this](const QString &account, const QString &password)
-            {
-                Q_UNUSED(account);
-                Q_UNUSED(password);
-                // 下一阶段在这里调用注册 Controller。
-            });
-
-    setCentralWidget(m_pageStack);
-
-    QWidget *welcomePage = createPlaceholderPage(
-        QStringLiteral("Go聊"),
-        QStringLiteral("说 Go 就 Go · 欢迎页占位"));
-    QWidget *authPage = createPlaceholderPage(
-        QStringLiteral("登录 / 注册"),
-        QStringLiteral("账号与密码表单将在后续阶段实现"));
+    // 创建原来的三栏聊天工作台。
     QWidget *chatPage = createChatWorkspacePage();
 
-    // 页面空白边缘区域支持拖动无边框窗口。交互控件本身不安装此过滤器，
-    // 避免按钮点击、输入文字或拖动分隔条时误触发窗口拖动。
-    installResizeEventFilters(welcomePage);
-    installResizeEventFilters(authPage);
+    // 保留原来的无边框窗口缩放功能。
     installResizeEventFilters(chatPage);
 
-    m_pageStack->addWidget(welcomePage);
-    m_pageStack->addWidget(authPage);
+    // 页面栈中只放聊天工作台。
     m_pageStack->addWidget(chatPage);
-
     m_pageStack->setCurrentWidget(chatPage);
-}
 
-// 创建一个垂直居中的简单占位页面，供欢迎页和登录页暂时使用。
-QWidget *MainWindow::createPlaceholderPage(const QString &title,
-                                           const QString &description,
-                                           QWidget *parent)
-{
-    auto *page = new QWidget(parent);
-    page->setAttribute(Qt::WA_TranslucentBackground);
-    page->setStyleSheet(QStringLiteral("background: transparent;"));
+    setCentralWidget(m_pageStack);
 
-    auto *layout = new QVBoxLayout(page);
-    layout->setContentsMargins(48, 48, 48, 48);
-    layout->setSpacing(14);
-    layout->addStretch(1);
-
-    auto *brand = new QLabel(QStringLiteral("G"), page);
-    brand->setAlignment(Qt::AlignCenter);
-    brand->setFixedSize(72, 72);
-    brand->setStyleSheet(QStringLiteral(
-        "QLabel { color: white; background: qlineargradient(x1:0,y1:0,x2:1,y2:1,"
-        "stop:0 #806BFF, stop:0.52 #6A53F6, stop:1 #927BFF);"
-        "border-radius: 25px; font-size: 38px; font-weight: 900; }"));
-
-    auto *titleLabel = new QLabel(title, page);
-    titleLabel->setAlignment(Qt::AlignCenter);
-    QFont titleFont = titleLabel->font();
-    titleFont.setFamily(QStringLiteral("Microsoft YaHei UI"));
-    titleFont.setPointSize(25);
-    titleFont.setBold(true);
-    titleLabel->setFont(titleFont);
-    titleLabel->setStyleSheet(QStringLiteral("color: #302A48; background: transparent;"));
-
-    auto *descriptionLabel = new QLabel(description, page);
-    descriptionLabel->setAlignment(Qt::AlignCenter);
-    descriptionLabel->setWordWrap(true);
-    descriptionLabel->setStyleSheet(QStringLiteral(
-        "color: #77708F; font-size: 13px; background: transparent;"));
-
-    layout->addWidget(brand, 0, Qt::AlignHCenter);
-    layout->addWidget(titleLabel);
-    layout->addWidget(descriptionLabel);
-    layout->addStretch(1);
-    return page;
+    // 主界面尺寸：1200 × 800。
+    resize(1200, 800);
 }
 
 // 将三个已实现的组件组合成工作台：导航栏 | 会话列表 | 当前聊天区域。
