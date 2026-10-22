@@ -53,7 +53,8 @@ add_executable(ChatRoomClient
     src/ui/InputBar.h
     src/ui/InputBar.cpp
     src/ui/ChatArea.qrc
-
+    src/ui/MessageBubble.h
+    src/ui/MessageBubble.cpp
 )
 
 # 引用项目公共协议定义和已有的第三方头文件
