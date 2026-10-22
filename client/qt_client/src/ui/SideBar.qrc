@@ -1,0 +1,5 @@
+<RCC>
+    <qresource prefix="/styles">
+        <file alias="SideBar.qss">../styles/SideBar.qss</file>
+    </qresource>
+</RCC>

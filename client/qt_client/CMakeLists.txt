@@ -36,6 +36,11 @@ add_executable(ChatRoomClient
     # 主窗口
     src/ui/MainWindow.h
     src/ui/MainWindow.cpp
+
+    # 左侧导航栏及其 QSS 资源
+    src/ui/SideBar.h
+    src/ui/SideBar.cpp
+    src/ui/SideBar.qrc
 )
 
 # 引用项目公共协议定义和已有的第三方头文件
