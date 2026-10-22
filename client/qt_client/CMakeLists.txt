@@ -47,6 +47,13 @@ add_executable(ChatRoomClient
     src/ui/SessionListPanel.cpp
     src/ui/SessionListPanel.qrc
 
+    # 右侧聊天区域、输入区以及对应的 QSS 资源
+    src/ui/ChatArea.h
+    src/ui/ChatArea.cpp
+    src/ui/InputBar.h
+    src/ui/InputBar.cpp
+    src/ui/ChatArea.qrc
+
 )
 
 # 引用项目公共协议定义和已有的第三方头文件

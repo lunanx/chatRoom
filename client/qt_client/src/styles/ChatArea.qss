@@ -1,0 +1,98 @@
+/* ChatArea：对应 HTML 的 .chat-panel、.chat-header 和窗口控制按钮。 */
+QWidget#chatArea {
+    background-color: #F5F2FB;
+    color: #302A48;
+    border: none;
+}
+
+QWidget#chatHeader {
+    background-color: rgba(255, 255, 255, 0.78);
+    border-bottom: 1px solid rgba(88, 70, 130, 0.08);
+}
+
+QLabel#chatHeaderAvatar {
+    color: #FFFFFF;
+    font-size: 13px;
+    font-weight: 800;
+    border: 1px solid rgba(255, 255, 255, 0.9);
+    border-radius: 16px;
+    background: qlineargradient(x1:0, y1:0, x2:1, y2:1,
+                                stop:0 #A39BEF, stop:1 #5550A6);
+}
+
+QLabel#chatHeaderName {
+    color: #302A48;
+    font-size: 12px;
+    font-weight: 800;
+}
+
+QLabel#onlineStatusText {
+    color: #77708F;
+    font-size: 9px;
+}
+
+QLabel#onlineStatusDot {
+    border: none;
+    border-radius: 3px;
+    background-color: #A39BB9;
+}
+QLabel#onlineStatusDot[online="true"] {
+    background-color: #50B994;
+}
+
+QListView#messageListView {
+    background: transparent;
+    border: none;
+    outline: none;
+    padding: 12px 18px;
+    color: #302A48;
+}
+QListView#messageListView::item {
+    border: none;
+}
+QListView#messageListView QScrollBar:vertical {
+    width: 7px;
+    margin: 5px 2px 5px 0;
+    background: transparent;
+}
+QListView#messageListView QScrollBar::handle:vertical {
+    min-height: 24px;
+    border-radius: 3px;
+    background: rgba(106, 83, 246, 0.20);
+}
+QListView#messageListView QScrollBar::add-line:vertical,
+QListView#messageListView QScrollBar::sub-line:vertical {
+    height: 0;
+}
+QListView#messageListView QScrollBar::add-page:vertical,
+QListView#messageListView QScrollBar::sub-page:vertical {
+    background: transparent;
+}
+
+QToolButton#minimizeButton,
+QToolButton#maximizeButton,
+QToolButton#closeButton {
+    color: #77708F;
+    background: transparent;
+    border: none;
+    border-radius: 8px;
+    font-family: "Segoe UI", "Microsoft YaHei", sans-serif;
+    font-size: 15px;
+    font-weight: 600;
+}
+QToolButton#minimizeButton:hover,
+QToolButton#maximizeButton:hover {
+    color: #5941E7;
+    background-color: rgba(106, 83, 246, 0.10);
+}
+QToolButton#closeButton:hover {
+    color: #FFFFFF;
+    background-color: #E96983;
+}
+QToolButton#minimizeButton:pressed,
+QToolButton#maximizeButton:pressed {
+    background-color: rgba(106, 83, 246, 0.17);
+}
+QToolButton#closeButton:pressed {
+    background-color: #D94D6C;
+}
