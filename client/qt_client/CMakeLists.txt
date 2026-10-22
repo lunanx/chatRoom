@@ -7,9 +7,12 @@ project(ChatRoomClient LANGUAGES CXX)
 # 使用 C++17 标准
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
+set(CMAKE_CXX_EXTENSIONS OFF)
 
 # 启用 Qt 的自动代码处理功能
 set(CMAKE_AUTOMOC ON)
+set(CMAKE_AUTOUIC ON)
+set(CMAKE_AUTORCC ON)
 
 # 查找 Qt 6 的 各种模块
 find_package(Qt6 6.5 REQUIRED COMPONENTS 
@@ -19,6 +22,8 @@ find_package(Qt6 6.5 REQUIRED COMPONENTS
 # 创建客户端可执行程序
 add_executable(ChatRoomClient
     src/main.cpp
+    # UI界面
+    src/Theme.h
 
     # 协议编解码
     src/network/ProtocolCodec.h
