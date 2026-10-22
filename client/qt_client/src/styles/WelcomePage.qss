@@ -1,0 +1,61 @@
+/* Go聊欢迎页：颜色和层次对应 HTML 的 Theme B。 */
+QWidget#welcomePage {
+    background-color: #F5F5FA;
+    color: #302A48;
+}
+
+QLabel#welcomeMark {
+    color: #FFFFFF;
+    background: qlineargradient(x1:0, y1:0, x2:1, y2:1,
+                                stop:0 #806BFF, stop:0.52 #6A53F6, stop:1 #927BFF);
+    border-radius: 25px;
+    font-size: 37px;
+    font-weight: 900;
+    padding-bottom: 3px;
+}
+
+QLabel#welcomeTitle {
+    color: #302A48;
+    font-size: 76px;
+    font-weight: 900;
+    letter-spacing: -4px;
+}
+
+QLabel#welcomeSlogan {
+    color: #6A53F6;
+    font-size: 29px;
+    font-weight: 850;
+    letter-spacing: 2px;
+}
+
+QLabel#welcomeDescription {
+    color: #77708F;
+    font-size: 13px;
+    line-height: 1.9;
+}
+
+QPushButton#welcomeEnterButton {
+    color: #FFFFFF;
+    border: none;
+    border-radius: 17px;
+    background: qlineargradient(x1:0, y1:0, x2:1, y2:1,
+                                stop:0 #806BFF, stop:0.52 #6A53F6, stop:1 #927BFF);
+    font-size: 13px;
+    font-weight: 800;
+    padding: 0 30px;
+}
+
+QPushButton#welcomeEnterButton:hover {
+    background: qlineargradient(x1:0, y1:0, x2:1, y2:1,
+                                stop:0 #8D7BFF, stop:0.52 #745FF8, stop:1 #A08CFF);
+}
+
+QPushButton#welcomeEnterButton:pressed {
+    background: #5941E7;
+}
+
+QLabel#welcomeFootnote {
+    color: #A39BB9;
+    font-size: 10px;
+    letter-spacing: 1px;
+}

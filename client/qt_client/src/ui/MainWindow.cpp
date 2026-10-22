@@ -1,6 +1,8 @@
 #include "MainWindow.h"
 
 #include "Theme.h"
+#include "ui/WelcomePage.h"
+#include "ui/AuthPage.h"
 #include "ui/ChatArea.h"
 #include "ui/SessionListPanel.h"
 #include "ui/SideBar.h"
@@ -25,7 +27,7 @@
 // 初始化无边框窗口和三个页面：欢迎页、登录页、聊天工作台。
 MainWindow::MainWindow(QWidget *parent)
     : QMainWindow(parent),
-      m_pages(new QStackedWidget(this))
+      m_pageStack(new QStackedWidget(this))
 {
     setWindowTitle(QStringLiteral("Go聊"));
     setWindowFlags(Qt::Window | Qt::FramelessWindowHint);
@@ -35,13 +37,47 @@ MainWindow::MainWindow(QWidget *parent)
     resize(1280, 800);
 
     // 页面栈背景保持透明，让 paintEvent 统一绘制窗口的紫灰渐变光晕。
-    m_pages->setObjectName(QStringLiteral("pageStack"));
-    m_pages->installEventFilter(this);
-    m_pages->setFrameShape(QFrame::NoFrame);
-    m_pages->setAttribute(Qt::WA_TranslucentBackground);
-    m_pages->setStyleSheet(QStringLiteral(
+    m_pageStack->setObjectName(QStringLiteral("pageStack"));
+    m_pageStack->installEventFilter(this);
+    m_pageStack->setFrameShape(QFrame::NoFrame);
+    m_pageStack->setAttribute(Qt::WA_TranslucentBackground);
+    m_pageStack->setStyleSheet(QStringLiteral(
         "QStackedWidget#pageStack { background: transparent; border: none; }"));
-    setCentralWidget(m_pages);
+
+    // 欢迎页面和登录/注册页面
+    m_welcomePage = new WelcomePage(m_pageStack);
+    m_authPage = new AuthPage(m_pageStack);
+
+    m_pageStack->addWidget(m_welcomePage); // index 0：欢迎页
+    m_pageStack->addWidget(m_authPage);    // index 1：登录 / 注册页
+    m_pageStack->setCurrentWidget(m_welcomePage);
+    setCentralWidget(m_pageStack);
+
+    connect(m_welcomePage, &WelcomePage::enterRequested,
+            this, [this]()
+            {
+    m_pageStack->setCurrentWidget(m_authPage);
+    m_authPage->focusAccountInput(); });
+
+    // 登录和注册按钮目前只发出信号；后续在 MainWindow 或 Controller 中连接到业务逻辑。
+    connect(m_authPage, &AuthPage::loginRequested,
+            this, [this](const QString &account, const QString &password, bool rememberMe)
+            {
+                Q_UNUSED(account);
+                Q_UNUSED(password);
+                Q_UNUSED(rememberMe);
+                // 下一阶段在这里调用登录 Controller。
+            });
+
+    connect(m_authPage, &AuthPage::registerRequested,
+            this, [this](const QString &account, const QString &password)
+            {
+                Q_UNUSED(account);
+                Q_UNUSED(password);
+                // 下一阶段在这里调用注册 Controller。
+            });
+
+    setCentralWidget(m_pageStack);
 
     QWidget *welcomePage = createPlaceholderPage(
         QStringLiteral("Go聊"),
@@ -57,13 +93,11 @@ MainWindow::MainWindow(QWidget *parent)
     installResizeEventFilters(authPage);
     installResizeEventFilters(chatPage);
 
-    m_pages->addWidget(welcomePage);
-    m_pages->addWidget(authPage);
-    m_pages->addWidget(chatPage);
+    m_pageStack->addWidget(welcomePage);
+    m_pageStack->addWidget(authPage);
+    m_pageStack->addWidget(chatPage);
 
-    // 当前先直接进入聊天工作台，方便集中检查三栏组合效果。
-    // 欢迎页和登录页仍保留在页面栈中，后续可增加页面切换逻辑。
-    m_pages->setCurrentWidget(chatPage);
+    m_pageStack->setCurrentWidget(chatPage);
 }
 
 // 创建一个垂直居中的简单占位页面，供欢迎页和登录页暂时使用。
@@ -155,18 +189,18 @@ QWidget *MainWindow::createChatWorkspacePage()
     // 这里仅联动演示数据，不代表已经连接服务器或加载了真实消息。
     connect(sessionPanel, &SessionListPanel::sessionActivated, this,
             [sessionPanel, chatArea](const QString &sessionId)
-    {
-        const SessionListModel *model = sessionPanel->sessionModel();
-        for (int row = 0; row < model->rowCount(); ++row)
-        {
-            const SessionItem *session = model->sessionAt(row);
-            if (session != nullptr && session->id == sessionId)
             {
-                chatArea->setConversationInfo(session->name, session->avatarText, true);
-                break;
-            }
-        }
-    });
+                const SessionListModel *model = sessionPanel->sessionModel();
+                for (int row = 0; row < model->rowCount(); ++row)
+                {
+                    const SessionItem *session = model->sessionAt(row);
+                    if (session != nullptr && session->id == sessionId)
+                    {
+                        chatArea->setConversationInfo(session->name, session->avatarText, true);
+                        break;
+                    }
+                }
+            });
 
     return page;
 }
@@ -392,7 +426,7 @@ bool MainWindow::eventFilter(QObject *watched, QEvent *event)
                 }
 
                 // 只有页面背景和页面栈本身负责拖动窗口；普通控件保留自己的交互。
-                if (watched == m_pages || watched == m_pages->currentWidget())
+                if (watched == m_pageStack || watched == m_pageStack->currentWidget())
                 {
                     m_dragging = true;
                     m_dragOffset = globalPosition - frameGeometry().topLeft();
@@ -426,7 +460,7 @@ bool MainWindow::eventFilter(QObject *watched, QEvent *event)
             }
 
             if (m_dragging && (mouseEvent->buttons() & Qt::LeftButton) &&
-                (watched == m_pages || watched == m_pages->currentWidget()))
+                (watched == m_pageStack || watched == m_pageStack->currentWidget()))
             {
                 move(globalPosition - m_dragOffset);
                 return true;
@@ -446,7 +480,7 @@ bool MainWindow::eventFilter(QObject *watched, QEvent *event)
                     watchedWidget->releaseMouse();
                     return true;
                 }
-                if (m_dragging && (watched == m_pages || watched == m_pages->currentWidget()))
+                if (m_dragging && (watched == m_pageStack || watched == m_pageStack->currentWidget()))
                 {
                     m_dragging = false;
                     return true;

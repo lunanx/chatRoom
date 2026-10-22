@@ -11,6 +11,8 @@ class QMouseEvent;
 class QPaintEvent;
 class QResizeEvent;
 class QStackedWidget;
+class WelcomePage;
+class AuthPage;
 class QWidget;
 
 // 客户端主窗口：管理欢迎页、登录页和聊天工作台三个页面。
@@ -46,7 +48,9 @@ private:
     // 根据边缘方向设置合适的鼠标指针。
     void updateResizeCursor(QWidget *watched, const QPoint &globalPosition);
 
-    QStackedWidget *m_pages = nullptr; // 页面栈，只显示当前页面。
+    QStackedWidget *m_pageStack = nullptr; // 页面栈，只显示当前页面。
+    WelcomePage *m_welcomePage = nullptr;
+    AuthPage *m_authPage = nullptr;
     QPoint m_dragOffset;              // 鼠标按下位置相对窗口左上角的偏移量。
     bool m_dragging = false;          // 当前是否正在拖动窗口。
     bool m_resizing = false;          // 当前是否正在拖动窗口边缘缩放。
