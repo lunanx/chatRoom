@@ -1,0 +1,144 @@
+/* Go聊主题 B：会话列表栏样式，对应最终 HTML 的 .conversation-rail。 */
+#sessionListPanel {
+    background: #FDFCFF;
+    border-right: 1px solid rgba(88, 70, 130, 26);
+}
+
+#sessionHeader {
+    background: transparent;
+}
+
+#sessionTitle {
+    color: #302A48;
+    font-size: 18px;
+    font-weight: 800;
+}
+
+#sessionCount {
+    color: #A39BB9;
+    font-size: 10px;
+    font-weight: 600;
+}
+
+#newSessionButton {
+    color: #6A53F6;
+    background: #FFFFFF;
+    border: 1px solid rgba(109, 88, 172, 31);
+    border-radius: 10px;
+    font-size: 21px;
+    font-weight: 400;
+}
+
+#newSessionButton:hover {
+    background: #F5F2FB;
+    border-color: rgba(106, 83, 246, 80);
+}
+
+#newSessionButton:pressed {
+    background: #ECE6FF;
+}
+
+#sessionSearchContainer {
+    background: transparent;
+}
+
+#sessionSearchEdit {
+    color: #4C4566;
+    background: #F5F2FB;
+    border: 1px solid rgba(88, 70, 130, 26);
+    border-radius: 12px;
+    padding: 0 11px;
+    selection-background-color: #6A53F6;
+    font-size: 11px;
+}
+
+#sessionSearchEdit:focus {
+    border: 1px solid rgba(106, 83, 246, 148);
+    background: #FFFFFF;
+}
+
+#sessionSearchEdit::placeholder {
+    color: #A39BB9;
+}
+
+#sessionFilterRow {
+    background: transparent;
+}
+
+QPushButton#filterAll,
+QPushButton#filterUnread,
+QPushButton#filterGroups {
+    color: #A39BB9;
+    background: transparent;
+    border: none;
+    border-radius: 9px;
+    padding: 0 10px;
+    font-size: 10px;
+    font-weight: 650;
+}
+
+QPushButton#filterAll:hover,
+QPushButton#filterUnread:hover,
+QPushButton#filterGroups:hover {
+    color: #6A53F6;
+    background: rgba(106, 83, 246, 20);
+}
+
+QPushButton#filterAll:checked,
+QPushButton#filterUnread:checked,
+QPushButton#filterGroups:checked {
+    color: #6A53F6;
+    background: #ECE6FF;
+}
+
+#sessionListView {
+    color: #302A48;
+    background: transparent;
+    border: none;
+    outline: none;
+    padding: 0 7px 14px 7px;
+}
+
+#sessionListView::item {
+    background: transparent;
+    border: none;
+    padding: 0;
+}
+
+#sessionListView::item:selected {
+    background: transparent;
+    border: none;
+}
+
+#sessionListView::item:hover {
+    background: transparent;
+}
+
+#sessionListView QScrollBar:vertical {
+    width: 6px;
+    margin: 3px 1px 3px 1px;
+    background: transparent;
+    border: none;
+}
+
+#sessionListView QScrollBar::handle:vertical {
+    min-height: 24px;
+    background: rgba(106, 83, 246, 55);
+    border-radius: 3px;
+}
+
+#sessionListView QScrollBar::handle:vertical:hover {
+    background: rgba(106, 83, 246, 100);
+}
+
+#sessionListView QScrollBar::add-line:vertical,
+#sessionListView QScrollBar::sub-line:vertical {
+    height: 0;
+    border: none;
+    background: transparent;
+}
+
+#sessionListView QScrollBar::add-page:vertical,
+#sessionListView QScrollBar::sub-page:vertical {
+    background: transparent;
+}

@@ -41,6 +41,12 @@ add_executable(ChatRoomClient
     src/ui/SideBar.h
     src/ui/SideBar.cpp
     src/ui/SideBar.qrc
+
+    # 中间会话列表
+    src/ui/SessionListPanel.h
+    src/ui/SessionListPanel.cpp
+    src/ui/SessionListPanel.qrc
+
 )
 
 # 引用项目公共协议定义和已有的第三方头文件
