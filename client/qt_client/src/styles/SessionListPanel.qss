@@ -1,7 +1,6 @@
 /* Go聊主题 B：会话列表栏样式，对应最终 HTML 的 .conversation-rail。 */
 #sessionListPanel {
     background: #FDFCFF;
-    border-right: 1px solid rgba(88, 70, 130, 26);
 }
 
 #sessionHeader {

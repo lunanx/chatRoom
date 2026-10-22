@@ -16,7 +16,7 @@
 
 namespace
 {
-    constexpr int kInputBarMinimumHeight = 170;
+    constexpr int kInputBarMinimumHeight = 112;
     constexpr int kToolButtonSize = 30;
 }
 
@@ -39,8 +39,9 @@ InputBar::InputBar(QWidget *parent)
     }
 
     auto *rootLayout = new QVBoxLayout(this);
-    rootLayout->setContentsMargins(18, 12, 18, 15);
-    rootLayout->setSpacing(8);
+    // 收紧内边距，让输入区整体更矮，同时保留工具栏和发送按钮的可用空间。
+    rootLayout->setContentsMargins(18, 9, 18, 10);
+    rootLayout->setSpacing(5);
 
     // 工具栏使用轻量的 QToolButton；这里先提供图标和提示文字。
     // 点击动作（表情选择、图片选择等）将在后续功能阶段实现。
@@ -48,7 +49,7 @@ InputBar::InputBar(QWidget *parent)
     toolbar->setObjectName(QStringLiteral("inputToolbar"));
     auto *toolbarLayout = new QHBoxLayout(toolbar);
     toolbarLayout->setContentsMargins(0, 0, 0, 0);
-    toolbarLayout->setSpacing(7);
+    toolbarLayout->setSpacing(6);
 
     const QStringList toolSymbols = {
         QStringLiteral("☺"), // 表情
@@ -105,7 +106,7 @@ InputBar::InputBar(QWidget *parent)
     m_sendButton = new QPushButton(QStringLiteral("发送  ↗"), this);
     m_sendButton->setObjectName(QStringLiteral("sendButton"));
     m_sendButton->setCursor(Qt::PointingHandCursor);
-    m_sendButton->setFixedSize(92, 36);
+    m_sendButton->setFixedSize(92, 34);
     m_sendButton->setDefault(false);
     bottomRow->addWidget(m_sendButton);
     rootLayout->addLayout(bottomRow);

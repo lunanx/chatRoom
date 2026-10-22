@@ -13,6 +13,9 @@
 #include <QMouseEvent>
 #include <QPainter>
 #include <QPainterPath>
+#include <QCursor>
+#include <QApplication>
+#include <QChildEvent>
 #include <QRadialGradient>
 #include <QSplitter>
 #include <QStackedWidget>
@@ -27,6 +30,7 @@ MainWindow::MainWindow(QWidget *parent)
     setWindowTitle(QStringLiteral("Go聊"));
     setWindowFlags(Qt::Window | Qt::FramelessWindowHint);
     setAttribute(Qt::WA_TranslucentBackground, false);
+    // 无系统边框，但保留自定义边缘缩放逻辑；最小尺寸防止布局被压坏。
     setMinimumSize(Theme::WindowMinimumWidth, Theme::WindowMinimumHeight);
     resize(1280, 800);
 
@@ -49,9 +53,9 @@ MainWindow::MainWindow(QWidget *parent)
 
     // 页面空白边缘区域支持拖动无边框窗口。交互控件本身不安装此过滤器，
     // 避免按钮点击、输入文字或拖动分隔条时误触发窗口拖动。
-    welcomePage->installEventFilter(this);
-    authPage->installEventFilter(this);
-    chatPage->installEventFilter(this);
+    installResizeEventFilters(welcomePage);
+    installResizeEventFilters(authPage);
+    installResizeEventFilters(chatPage);
 
     m_pages->addWidget(welcomePage);
     m_pages->addWidget(authPage);
@@ -118,7 +122,8 @@ QWidget *MainWindow::createChatWorkspacePage()
     auto *splitter = new QSplitter(Qt::Horizontal, page);
     splitter->setObjectName(QStringLiteral("chatWorkspaceSplitter"));
     splitter->setChildrenCollapsible(false);
-    splitter->setHandleWidth(8);
+    // 三栏之间只保留 0px 的细间距，QSplitter 仍然可以拖动调整宽度。
+    splitter->setHandleWidth(0);
     splitter->setOpaqueResize(true);
 
     auto *sideBar = new SideBar(splitter);
@@ -141,7 +146,8 @@ QWidget *MainWindow::createChatWorkspacePage()
 
     // 用外边距和间隔把三个区域分开，保留紫灰主题的呼吸感。
     auto *layout = new QHBoxLayout(page);
-    layout->setContentsMargins(16, 16, 16, 16);
+    // 整个窗口不留外框空隙，三栏工作台直接铺满客户区。
+    layout->setContentsMargins(0, 0, 0, 0);
     layout->setSpacing(0);
     layout->addWidget(splitter);
 
@@ -163,6 +169,94 @@ QWidget *MainWindow::createChatWorkspacePage()
     });
 
     return page;
+}
+
+// 为当前页面及所有子控件安装过滤器，这样鼠标停在聊天区/会话列表上时，
+// 仍然可以从窗口最外侧的几个像素拖动边缘缩放，而不是只能拖动主窗口空白处。
+void MainWindow::installResizeEventFilters(QWidget *widget)
+{
+    if (widget == nullptr)
+    {
+        return;
+    }
+
+    widget->installEventFilter(this);
+    widget->setMouseTracking(true);
+    const auto children = widget->findChildren<QWidget *>(QString(), Qt::FindDirectChildrenOnly);
+    for (QWidget *child : children)
+    {
+        installResizeEventFilters(child);
+    }
+}
+
+Qt::Edges MainWindow::resizeEdgesAt(const QPoint &globalPosition) const
+{
+    // 最大化窗口不允许边缘缩放，恢复普通窗口后即可再次调整大小。
+    if (isMaximized() || isFullScreen())
+    {
+        return Qt::Edges();
+    }
+
+    constexpr int kResizeBorder = 7;
+    const QRect bounds = frameGeometry();
+    Qt::Edges edges;
+    if (globalPosition.x() <= bounds.left() + kResizeBorder)
+        edges |= Qt::LeftEdge;
+    else if (globalPosition.x() >= bounds.right() - kResizeBorder)
+        edges |= Qt::RightEdge;
+
+    if (globalPosition.y() <= bounds.top() + kResizeBorder)
+        edges |= Qt::TopEdge;
+    else if (globalPosition.y() >= bounds.bottom() - kResizeBorder)
+        edges |= Qt::BottomEdge;
+
+    return edges;
+}
+
+void MainWindow::updateResizeCursor(QWidget *watched, const QPoint &globalPosition)
+{
+    if (watched == nullptr || m_resizing)
+    {
+        return;
+    }
+
+    const Qt::Edges edges = resizeEdgesAt(globalPosition);
+    const Qt::CursorShape currentShape = watched->cursor().shape();
+    const bool currentlyShowingResizeCursor =
+        currentShape == Qt::SizeFDiagCursor || currentShape == Qt::SizeBDiagCursor ||
+        currentShape == Qt::SizeHorCursor || currentShape == Qt::SizeVerCursor;
+
+    // 不在边缘时，只清除本函数设置过的缩放光标，不覆盖文本框的 I-beam 等光标。
+    if (edges == Qt::Edges())
+    {
+        if (currentlyShowingResizeCursor)
+        {
+            watched->unsetCursor();
+        }
+        return;
+    }
+
+    Qt::CursorShape shape = Qt::ArrowCursor;
+    if ((edges.testFlag(Qt::LeftEdge) && edges.testFlag(Qt::TopEdge)) ||
+        (edges.testFlag(Qt::RightEdge) && edges.testFlag(Qt::BottomEdge)))
+    {
+        shape = Qt::SizeFDiagCursor;
+    }
+    else if ((edges.testFlag(Qt::RightEdge) && edges.testFlag(Qt::TopEdge)) ||
+             (edges.testFlag(Qt::LeftEdge) && edges.testFlag(Qt::BottomEdge)))
+    {
+        shape = Qt::SizeBDiagCursor;
+    }
+    else if (edges.testFlag(Qt::LeftEdge) || edges.testFlag(Qt::RightEdge))
+    {
+        shape = Qt::SizeHorCursor;
+    }
+    else if (edges.testFlag(Qt::TopEdge) || edges.testFlag(Qt::BottomEdge))
+    {
+        shape = Qt::SizeVerCursor;
+    }
+
+    watched->setCursor(shape);
 }
 
 // Qt 在窗口需要重绘时调用此函数，绘制设计稿中的紫灰背景光晕。
@@ -194,8 +288,20 @@ void MainWindow::mousePressEvent(QMouseEvent *event)
 {
     if (event->button() == Qt::LeftButton)
     {
+        const QPoint globalPosition = event->globalPosition().toPoint();
+        const Qt::Edges edges = resizeEdgesAt(globalPosition);
+        if (edges != Qt::Edges())
+        {
+            m_resizing = true;
+            m_resizeEdges = edges;
+            m_resizeStartGlobal = globalPosition;
+            m_resizeStartGeometry = geometry();
+            event->accept();
+            return;
+        }
+
         m_dragging = true;
-        m_dragOffset = event->globalPosition().toPoint() - frameGeometry().topLeft();
+        m_dragOffset = globalPosition - frameGeometry().topLeft();
         event->accept();
         return;
     }
@@ -205,9 +311,34 @@ void MainWindow::mousePressEvent(QMouseEvent *event)
 // 左键按住移动鼠标时移动整个无边框窗口。
 void MainWindow::mouseMoveEvent(QMouseEvent *event)
 {
+    const QPoint globalPosition = event->globalPosition().toPoint();
+    if (m_resizing && (event->buttons() & Qt::LeftButton))
+    {
+        const QPoint delta = globalPosition - m_resizeStartGlobal;
+        QRect nextGeometry = m_resizeStartGeometry;
+
+        // 依据拖动方向调整窗口边缘，并始终遵守窗口最小宽高。
+        if (m_resizeEdges.testFlag(Qt::LeftEdge))
+            nextGeometry.setLeft(qMin(m_resizeStartGeometry.left() + delta.x(),
+                                      m_resizeStartGeometry.right() - minimumWidth() + 1));
+        if (m_resizeEdges.testFlag(Qt::RightEdge))
+            nextGeometry.setRight(qMax(m_resizeStartGeometry.right() + delta.x(),
+                                       m_resizeStartGeometry.left() + minimumWidth() - 1));
+        if (m_resizeEdges.testFlag(Qt::TopEdge))
+            nextGeometry.setTop(qMin(m_resizeStartGeometry.top() + delta.y(),
+                                     m_resizeStartGeometry.bottom() - minimumHeight() + 1));
+        if (m_resizeEdges.testFlag(Qt::BottomEdge))
+            nextGeometry.setBottom(qMax(m_resizeStartGeometry.bottom() + delta.y(),
+                                        m_resizeStartGeometry.top() + minimumHeight() - 1));
+
+        setGeometry(nextGeometry);
+        event->accept();
+        return;
+    }
+
     if (m_dragging && (event->buttons() & Qt::LeftButton))
     {
-        move(event->globalPosition().toPoint() - m_dragOffset);
+        move(globalPosition - m_dragOffset);
         event->accept();
         return;
     }
@@ -220,45 +351,118 @@ void MainWindow::mouseReleaseEvent(QMouseEvent *event)
     if (event->button() == Qt::LeftButton)
     {
         m_dragging = false;
+        m_resizing = false;
+        m_resizeEdges = Qt::Edges();
         event->accept();
         return;
     }
     QMainWindow::mouseReleaseEvent(event);
 }
 
+void MainWindow::leaveEvent(QEvent *event)
+{
+    unsetCursor();
+    QMainWindow::leaveEvent(event);
+}
+
 // 让页面栈和页面空白处也能拖动窗口；控件内部的点击交互仍由控件自己处理。
 bool MainWindow::eventFilter(QObject *watched, QEvent *event)
 {
-    if (watched == m_pages || watched == m_pages->currentWidget())
+    auto *watchedWidget = qobject_cast<QWidget *>(watched);
+    if (watchedWidget != nullptr)
     {
         if (event->type() == QEvent::MouseButtonPress)
         {
             auto *mouseEvent = static_cast<QMouseEvent *>(event);
             if (mouseEvent->button() == Qt::LeftButton)
             {
-                m_dragging = true;
-                m_dragOffset = mouseEvent->globalPosition().toPoint() - frameGeometry().topLeft();
-                return true;
+                const QPoint globalPosition = mouseEvent->globalPosition().toPoint();
+                const Qt::Edges edges = resizeEdgesAt(globalPosition);
+                if (edges != Qt::Edges())
+                {
+                    // 先处理边缘缩放，避免它被页面拖动逻辑当成移动窗口。
+                    m_resizing = true;
+                    m_dragging = false;
+                    m_resizeEdges = edges;
+                    m_resizeStartGlobal = globalPosition;
+                    m_resizeStartGeometry = geometry();
+                    // 事件被过滤器拦截后，主动抓取鼠标，确保拖出当前子控件时仍能持续缩放。
+                    watchedWidget->grabMouse();
+                    return true;
+                }
+
+                // 只有页面背景和页面栈本身负责拖动窗口；普通控件保留自己的交互。
+                if (watched == m_pages || watched == m_pages->currentWidget())
+                {
+                    m_dragging = true;
+                    m_dragOffset = globalPosition - frameGeometry().topLeft();
+                    return true;
+                }
             }
         }
-        else if (event->type() == QEvent::MouseMove && m_dragging)
+        else if (event->type() == QEvent::MouseMove)
         {
             auto *mouseEvent = static_cast<QMouseEvent *>(event);
-            if (mouseEvent->buttons() & Qt::LeftButton)
+            const QPoint globalPosition = mouseEvent->globalPosition().toPoint();
+
+            if (m_resizing && (mouseEvent->buttons() & Qt::LeftButton))
             {
-                move(mouseEvent->globalPosition().toPoint() - m_dragOffset);
+                const QPoint delta = globalPosition - m_resizeStartGlobal;
+                QRect nextGeometry = m_resizeStartGeometry;
+                if (m_resizeEdges.testFlag(Qt::LeftEdge))
+                    nextGeometry.setLeft(qMin(m_resizeStartGeometry.left() + delta.x(),
+                                              m_resizeStartGeometry.right() - minimumWidth() + 1));
+                if (m_resizeEdges.testFlag(Qt::RightEdge))
+                    nextGeometry.setRight(qMax(m_resizeStartGeometry.right() + delta.x(),
+                                               m_resizeStartGeometry.left() + minimumWidth() - 1));
+                if (m_resizeEdges.testFlag(Qt::TopEdge))
+                    nextGeometry.setTop(qMin(m_resizeStartGeometry.top() + delta.y(),
+                                             m_resizeStartGeometry.bottom() - minimumHeight() + 1));
+                if (m_resizeEdges.testFlag(Qt::BottomEdge))
+                    nextGeometry.setBottom(qMax(m_resizeStartGeometry.bottom() + delta.y(),
+                                                m_resizeStartGeometry.top() + minimumHeight() - 1));
+                setGeometry(nextGeometry);
                 return true;
             }
+
+            if (m_dragging && (mouseEvent->buttons() & Qt::LeftButton) &&
+                (watched == m_pages || watched == m_pages->currentWidget()))
+            {
+                move(globalPosition - m_dragOffset);
+                return true;
+            }
+
+            updateResizeCursor(watchedWidget, globalPosition);
         }
         else if (event->type() == QEvent::MouseButtonRelease)
         {
             auto *mouseEvent = static_cast<QMouseEvent *>(event);
             if (mouseEvent->button() == Qt::LeftButton)
             {
-                m_dragging = false;
-                return true;
+                if (m_resizing)
+                {
+                    m_resizing = false;
+                    m_resizeEdges = Qt::Edges();
+                    watchedWidget->releaseMouse();
+                    return true;
+                }
+                if (m_dragging && (watched == m_pages || watched == m_pages->currentWidget()))
+                {
+                    m_dragging = false;
+                    return true;
+                }
+            }
+        }
+        else if (event->type() == QEvent::Leave)
+        {
+            const Qt::CursorShape shape = watchedWidget->cursor().shape();
+            if (shape == Qt::SizeFDiagCursor || shape == Qt::SizeBDiagCursor ||
+                shape == Qt::SizeHorCursor || shape == Qt::SizeVerCursor)
+            {
+                watchedWidget->unsetCursor();
             }
         }
     }
+
     return QMainWindow::eventFilter(watched, event);
 }

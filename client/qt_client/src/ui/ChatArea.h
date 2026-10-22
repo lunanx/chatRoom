@@ -6,6 +6,8 @@
 class QLabel;
 class QListView;
 class QToolButton;
+class QSplitter;
+class QResizeEvent;
 class InputBar;
 
 // 聊天主区域，对应最终 HTML 设计稿中的 .chat-panel。
@@ -30,6 +32,10 @@ signals:
     // 输入区发送文本时向外转发；后续由控制器连接并提交到网络层。
     void sendRequested(const QString &text);
 
+protected:
+    // 窗口尺寸变化时，更新输入区允许的最大高度，确保它不超过消息区。
+    void resizeEvent(QResizeEvent *event) override;
+
 private:
     // 窗口控制按钮操作顶层窗口，而不是只隐藏 ChatArea 组件。
     void minimizeWindow();
@@ -40,6 +46,7 @@ private:
     QLabel *m_nameLabel = nullptr;
     QLabel *m_statusLabel = nullptr;
     QLabel *m_statusDot = nullptr;
+    QSplitter *m_contentSplitter = nullptr; // 垂直分隔消息区和输入区，允许用户调整比例。
     QListView *m_messageListView = nullptr;
     InputBar *m_inputBar = nullptr;
     QToolButton *m_minimizeButton = nullptr;
