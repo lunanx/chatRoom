@@ -78,3 +78,6 @@ Testing/
 
 # 允许提交无隐私的环境变量模板
 !.env.example
+
+# 不上传自己的.vscode配置
+.vscode
