@@ -2,9 +2,11 @@
 
 #include <QObject>
 #include <QByteArray>
+#include <QHash>
 #include <QJsonObject>
 #include <QQueue>
 #include <QString>
+#include <QTimer>
 #include <QtGlobal>
 
 #include "protocol/ProtocolHeader.h"
@@ -97,7 +99,7 @@ private:
 
     // 从 client.conf 读取的服务器配置。
     QString m_serverHost;
-    quint16 m_serverPort;
+    quint16 m_serverPort = 0;
 
     // 防止短时间内重复调用 connectToServer。
     bool m_isConnecting = false;
@@ -107,4 +109,17 @@ private:
 
     // 在 TCP 连接建立之前，先把用户请求放在这里等待发送。
     QQueue<PendingRequest> m_pendingRequests;
+
+    // 记录已经发出、但尚未收到服务器响应的请求。
+    // key 是 requestId，value 是原始请求命令，用于验证响应是否对应当前请求。
+    QHash<quint64, protocolHeader::CommandType> m_requestsAwaitingResponse;
+
+    // 防止用户在一次登录/注册请求得到结果之前重复提交。
+    bool m_authRequestPending = false;
+
+    // 防止服务器连接成功后却一直不返回响应，导致认证流程永久卡住。
+    QTimer m_authRequestTimer;
+
+    // 启动时只读取配置，不主动连接；用户提交登录/注册时再建立 TCP 连接。
+    bool m_configurationValid = false;
 };

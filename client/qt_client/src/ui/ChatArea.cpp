@@ -12,7 +12,6 @@
 #include <QAbstractItemView>
 #include <QStyle>
 #include <QSizePolicy>
-#include <QToolButton>
 #include <QVBoxLayout>
 #include <QWidget>
 #include <QDebug>
@@ -21,8 +20,6 @@ namespace
 {
     constexpr int kHeaderHeight = 48;
     constexpr int kAvatarSize = 32;
-    constexpr int kWindowButtonWidth = 32;
-    constexpr int kWindowButtonHeight = 26;
     constexpr int kInputBarInitialHeight = 148;
     constexpr int kInputBarMinimumHeight = 112;
 }
@@ -33,7 +30,7 @@ ChatArea::ChatArea(QWidget *parent)
     setObjectName(QStringLiteral("chatArea"));
     setAttribute(Qt::WA_StyledBackground, true);
 
-    // ChatArea 样式包含聊天面板背景、Header、消息列表和窗口控制按钮。
+    // ChatArea 样式只负责聊天面板背景、Header 和消息列表；窗口控制按钮由 MainWindow 统一管理。
     QFile styleFile(QStringLiteral(":/styles/ChatArea.qss"));
     if (styleFile.open(QIODevice::ReadOnly | QIODevice::Text))
     {
@@ -94,29 +91,8 @@ ChatArea::ChatArea(QWidget *parent)
     headerLayout->addWidget(identityWidget);
     headerLayout->addStretch(1);
 
-    // 窗口控制按钮位于聊天区右上角。因为主窗口是无边框窗口，按钮需自行控制顶层窗口。
-    m_minimizeButton = new QToolButton(header);
-    m_minimizeButton->setObjectName(QStringLiteral("minimizeButton"));
-    m_minimizeButton->setText(QStringLiteral("—"));
-    m_minimizeButton->setToolTip(QStringLiteral("最小化"));
-
-    m_maximizeButton = new QToolButton(header);
-    m_maximizeButton->setObjectName(QStringLiteral("maximizeButton"));
-    m_maximizeButton->setText(QStringLiteral("□"));
-    m_maximizeButton->setToolTip(QStringLiteral("最大化 / 还原"));
-
-    m_closeButton = new QToolButton(header);
-    m_closeButton->setObjectName(QStringLiteral("closeButton"));
-    m_closeButton->setText(QStringLiteral("×"));
-    m_closeButton->setToolTip(QStringLiteral("关闭"));
-
-    for (QToolButton *button : {m_minimizeButton, m_maximizeButton, m_closeButton})
-    {
-        button->setFixedSize(kWindowButtonWidth, kWindowButtonHeight);
-        button->setCursor(Qt::PointingHandCursor);
-        button->setFocusPolicy(Qt::NoFocus);
-        headerLayout->addWidget(button);
-    }
+    // 不在 ChatArea 的会话 Header 中创建另一组窗口控制按钮。
+    // 顶层窗口的控制按钮统一由 MainWindow 中的 WindowTopControls 提供。
     rootLayout->addWidget(header);
 
     // 使用垂直 QSplitter 分隔消息区和输入区，用户可以拖动中间分隔条调整比例。
@@ -150,12 +126,6 @@ ChatArea::ChatArea(QWidget *parent)
     m_contentSplitter->setSizes({500, kInputBarInitialHeight});
     rootLayout->addWidget(m_contentSplitter, 1);
 
-    connect(m_minimizeButton, &QToolButton::clicked,
-            this, &ChatArea::minimizeWindow);
-    connect(m_maximizeButton, &QToolButton::clicked,
-            this, &ChatArea::toggleMaximizeWindow);
-    connect(m_closeButton, &QToolButton::clicked,
-            this, &ChatArea::closeWindow);
     connect(m_inputBar, &InputBar::sendRequested,
             this, &ChatArea::sendRequested);
 }
@@ -209,42 +179,3 @@ InputBar *ChatArea::inputBar() const
     return m_inputBar;
 }
 
-void ChatArea::minimizeWindow()
-{
-    QWidget *topLevel = window();
-    if (topLevel != nullptr)
-    {
-        topLevel->showMinimized();
-    }
-}
-
-void ChatArea::toggleMaximizeWindow()
-{
-    QWidget *topLevel = window();
-    if (topLevel == nullptr)
-    {
-        return;
-    }
-
-    // 最大化后再次点击恢复普通窗口状态。
-    if (topLevel->isMaximized())
-    {
-        topLevel->showNormal();
-        m_maximizeButton->setText(QStringLiteral("□"));
-    }
-    else
-    {
-        topLevel->showMaximized();
-        m_maximizeButton->setText(QStringLiteral("❐"));
-    }
-}
-
-void ChatArea::closeWindow()
-{
-    // 关闭的是顶层窗口，不会只把聊天区域从布局中隐藏。
-    QWidget *topLevel = window();
-    if (topLevel != nullptr)
-    {
-        topLevel->close();
-    }
-}

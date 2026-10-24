@@ -5,13 +5,12 @@
 
 class QLabel;
 class QListView;
-class QToolButton;
 class QSplitter;
 class QResizeEvent;
 class InputBar;
 
 // 聊天主区域，对应最终 HTML 设计稿中的 .chat-panel。
-// 包含会话 Header、消息列表占位区、底部输入区和无边框窗口控制按钮。
+// 包含会话 Header、消息列表占位区和底部输入区；顶层窗口控制由 MainWindow 统一管理。
 class ChatArea : public QWidget
 {
     Q_OBJECT
@@ -37,11 +36,6 @@ protected:
     void resizeEvent(QResizeEvent *event) override;
 
 private:
-    // 窗口控制按钮操作顶层窗口，而不是只隐藏 ChatArea 组件。
-    void minimizeWindow();
-    void toggleMaximizeWindow();
-    void closeWindow();
-
     QLabel *m_avatarLabel = nullptr;
     QLabel *m_nameLabel = nullptr;
     QLabel *m_statusLabel = nullptr;
@@ -49,7 +43,4 @@ private:
     QSplitter *m_contentSplitter = nullptr; // 垂直分隔消息区和输入区，允许用户调整比例。
     QListView *m_messageListView = nullptr;
     InputBar *m_inputBar = nullptr;
-    QToolButton *m_minimizeButton = nullptr;
-    QToolButton *m_maximizeButton = nullptr;
-    QToolButton *m_closeButton = nullptr;
 };

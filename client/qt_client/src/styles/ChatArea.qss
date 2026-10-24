@@ -1,4 +1,4 @@
-/* ChatArea：对应 HTML 的 .chat-panel、.chat-header 和窗口控制按钮。 */
+/* ChatArea：对应聊天面板、会话 Header 和消息列表。顶层窗口控制由 MainWindow 统一绘制。 */
 QWidget#chatArea {
     background-color: #F5F2FB;
     color: #302A48;
@@ -69,30 +69,3 @@ QListView#messageListView QScrollBar::sub-page:vertical {
     background: transparent;
 }
 
-QToolButton#minimizeButton,
-QToolButton#maximizeButton,
-QToolButton#closeButton {
-    color: #77708F;
-    background: transparent;
-    border: none;
-    border-radius: 8px;
-    font-family: "Segoe UI", "Microsoft YaHei", sans-serif;
-    font-size: 15px;
-    font-weight: 600;
-}
-QToolButton#minimizeButton:hover,
-QToolButton#maximizeButton:hover {
-    color: #5941E7;
-    background-color: rgba(106, 83, 246, 0.10);
-}
-QToolButton#closeButton:hover {
-    color: #FFFFFF;
-    background-color: #E96983;
-}
-QToolButton#minimizeButton:pressed,
-QToolButton#maximizeButton:pressed {
-    background-color: rgba(106, 83, 246, 0.17);
-}
-QToolButton#closeButton:pressed {
-    background-color: #D94D6C;
-}
