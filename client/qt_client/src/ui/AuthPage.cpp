@@ -1,4 +1,5 @@
 #include "AuthPage.h"
+#include "WindowTopControls.h"
 
 #include <QCheckBox>
 #include <QEvent>
@@ -13,8 +14,8 @@
 #include <QWidget>
 #include <QColor>
 #include <QPaintEvent>
+#include <QResizeEvent>
 #include <QPainter>
-#include <QPainterPath>
 #include <QSizePolicy>
 #include <QLinearGradient>
 
@@ -38,17 +39,7 @@ namespace
             QPainter painter(this);
             painter.setRenderHint(QPainter::Antialiasing, true);
 
-            // 裁剪左侧两个外角，避免品牌渐变覆盖卡片的圆角。
-            QPainterPath clipPath;
-            clipPath.moveTo(31, 0);
-            clipPath.lineTo(width(), 0);
-            clipPath.lineTo(width(), height());
-            clipPath.lineTo(31, height());
-            clipPath.quadTo(0, height(), 0, height() - 31);
-            clipPath.lineTo(0, 31);
-            clipPath.quadTo(0, 0, 31, 0);
-            painter.setClipPath(clipPath);
-
+            // 品牌区完整填充矩形，不再裁剪四角。
             QLinearGradient background(rect().topLeft(), rect().bottomRight());
             background.setColorAt(0.0, QColor(QStringLiteral("#F1EDFF")));
             background.setColorAt(0.58, QColor(QStringLiteral("#E9E3FB")));
@@ -123,54 +114,21 @@ AuthPage::AuthPage(QWidget *parent)
     // 页面最小尺寸交给 LoginWindow 控制，方便欢迎页缩小到 400 × 500。
     setMinimumSize(0, 0);
 
-    // 卡片直接铺满窗口内部，只留少量空间显示圆角，不再出现外框。
+    // 卡片直接铺满窗口内部，不再设置外框或圆角。
     // 使用网格布局，让窗口控制按钮浮在卡片右上角，不额外占用表单空间。
     auto *pageLayout = new QGridLayout(this);
-    pageLayout->setContentsMargins(6, 6, 6, 6);
+    pageLayout->setContentsMargins(0, 0, 0, 0);
     pageLayout->setSizeConstraint(QLayout::SetNoConstraint);
     pageLayout->setSpacing(0);
 
-    // 登录/注册页也只保留窗口控制按钮，不显示系统标题栏。
-    auto *windowControls = new QWidget(this);
-    auto *controlsLayout = new QHBoxLayout(windowControls);
-    controlsLayout->setContentsMargins(0, 0, 0, 0);
-    controlsLayout->setSpacing(4);
-    const auto makeControl = [windowControls](const QString &text, const QString &name)
-    {
-        auto *button = new QPushButton(text, windowControls);
-        button->setObjectName(name);
-        button->setFixedSize(22, 22);
-        button->setCursor(Qt::PointingHandCursor);
-        // 控制按钮直接融入右侧页面背景，不再使用白色圆形底和外边框。
-        // 只有悬停时才显示很淡的背景反馈，避免破坏整体卡片效果。
-        button->setStyleSheet(QStringLiteral(
-            "QPushButton { color: #625A7D; background: transparent; "
-            "border: none; border-radius: 11px; font-size: 12px; padding: 0; }"
-            "QPushButton:hover { background: rgba(106,83,246,18); }"
-            "QPushButton:pressed { background: rgba(106,83,246,30); }"));
-        return button;
-    };
-    auto *minButton = makeControl(QStringLiteral("−"), QStringLiteral("windowMinButton"));
-    auto *maxButton = makeControl(QStringLiteral("□"), QStringLiteral("windowMaxButton"));
-    auto *closeButton = makeControl(QStringLiteral("×"), QStringLiteral("windowCloseButton"));
-    controlsLayout->addStretch(1);
-    controlsLayout->addWidget(minButton);
-    controlsLayout->addWidget(maxButton);
-    controlsLayout->addWidget(closeButton);
-
-    connect(minButton, &QPushButton::clicked, this, [this]() { window()->showMinimized(); });
-    connect(maxButton, &QPushButton::clicked, this, [this]()
-    {
-        if (window()->isMaximized()) window()->showNormal();
-        else window()->showMaximized();
-    });
-    connect(closeButton, &QPushButton::clicked, this, [this]() { window()->close(); });
+    // 三色圆点覆盖在页面右上角，不额外占用登录表单的布局空间。
+    m_windowControls = createWindowTopControls(this, window());
+    m_windowControls->raise();
 
     auto *card = new QWidget(this);
     card->setObjectName(QStringLiteral("authCard"));
     // 卡片宽高由表单内容和窗口尺寸决定，不再强制撑大欢迎页窗口。
     card->setMinimumSize(0, 0);
-    card->setMaximumWidth(1120);
 
     auto *cardLayout = new QHBoxLayout(card);
     cardLayout->setContentsMargins(0, 0, 0, 0);
@@ -331,12 +289,10 @@ AuthPage::AuthPage(QWidget *parent)
     cardLayout->addWidget(formPanel, 57);
     formPanelLayout->addWidget(form);
 
-    // 卡片铺满页面；控制按钮覆盖在右上角，靠右留出 10px 内边距。
+    // 卡片铺满整个窗口；取消最大宽度限制，最大化/全屏时左右两栏也会铺满屏幕。
     pageLayout->addWidget(card, 0, 0);
-    pageLayout->addWidget(windowControls, 0, 0, Qt::AlignRight | Qt::AlignTop);
-    pageLayout->setAlignment(windowControls, Qt::AlignRight | Qt::AlignTop);
-    windowControls->raise();
-    windowControls->setContentsMargins(0, 2, 4, 0);
+    m_windowControls->move(width() - 18 - m_windowControls->width(), 14);
+    m_windowControls->raise();
 
     connect(m_loginButton, &QPushButton::clicked,
             this, [this]()
@@ -384,4 +340,14 @@ bool AuthPage::eventFilter(QObject *watched, QEvent *event)
     }
 
     return QWidget::eventFilter(watched, event);
+}
+
+void AuthPage::resizeEvent(QResizeEvent *event)
+{
+    QWidget::resizeEvent(event);
+    if (m_windowControls != nullptr)
+    {
+        m_windowControls->move(width() - 18 - m_windowControls->width(), 14);
+        m_windowControls->raise();
+    }
 }

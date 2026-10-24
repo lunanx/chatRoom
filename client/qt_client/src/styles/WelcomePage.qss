@@ -1,6 +1,6 @@
 /* Go聊欢迎页：颜色和层次对应 HTML 的 Theme B。 */
 QWidget#welcomePage {
-    background-color: #F5F5FA;
+    background-color: transparent;
     color: #302A48;
 }
 

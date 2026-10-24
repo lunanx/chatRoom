@@ -1,4 +1,5 @@
 #include "MainWindow.h"
+#include "WindowTopControls.h"
 
 #include "Theme.h"
 #include "ui/ChatArea.h"
@@ -11,8 +12,8 @@
 #include <QHBoxLayout>
 #include <QLabel>
 #include <QMouseEvent>
+#include <QResizeEvent>
 #include <QPainter>
-#include <QPainterPath>
 #include <QCursor>
 #include <QApplication>
 #include <QChildEvent>
@@ -29,7 +30,7 @@ MainWindow::MainWindow(QWidget *parent)
 {
     setWindowTitle(QStringLiteral("Go聊"));
     setWindowFlags(Qt::Window | Qt::FramelessWindowHint);
-    setAttribute(Qt::WA_TranslucentBackground, false);
+    // 使用不透明、直角的无边框窗口，不应用圆角遮罩。
     // 无系统边框，但保留自定义边缘缩放逻辑；最小尺寸防止布局被压坏。
     setMinimumSize(Theme::WindowMinimumWidth, Theme::WindowMinimumHeight);
     resize(1280, 800);
@@ -38,7 +39,6 @@ MainWindow::MainWindow(QWidget *parent)
     m_pageStack->setObjectName(QStringLiteral("pageStack"));
     m_pageStack->installEventFilter(this);
     m_pageStack->setFrameShape(QFrame::NoFrame);
-    m_pageStack->setAttribute(Qt::WA_TranslucentBackground);
     m_pageStack->setStyleSheet(QStringLiteral(
         "QStackedWidget#pageStack { background: transparent; border: none; }"));
 
@@ -54,8 +54,14 @@ MainWindow::MainWindow(QWidget *parent)
 
     setCentralWidget(m_pageStack);
 
+    // 主窗口也使用与页面背景融合的同色系圆点控制按钮。
+    m_windowControls = createWindowTopControls(this, this);
+    m_windowControls->raise();
+
     // 主界面尺寸：1200 × 800。
     resize(1200, 800);
+    m_windowControls->move(width() - 18 - m_windowControls->width(), 14);
+    m_windowControls->raise();
 }
 
 // 将三个已实现的组件组合成工作台：导航栏 | 会话列表 | 当前聊天区域。
@@ -214,6 +220,8 @@ void MainWindow::paintEvent(QPaintEvent *event)
 
     QPainter painter(this);
     painter.setRenderHint(QPainter::Antialiasing, true);
+
+    // 先填满整个客户区，保证最大化后四边和四角都覆盖屏幕。
     painter.fillRect(rect(), Theme::Page);
 
     QRadialGradient topGlow(QPointF(width() * 0.14, height() * 0.10),
@@ -231,10 +239,21 @@ void MainWindow::paintEvent(QPaintEvent *event)
     painter.fillRect(rect(), bottomGlow);
 }
 
+// 窗口尺寸变化后，同步更新右上角控制按钮的位置。
+void MainWindow::resizeEvent(QResizeEvent *event)
+{
+    QMainWindow::resizeEvent(event);
+    if (m_windowControls != nullptr)
+    {
+        m_windowControls->move(width() - 18 - m_windowControls->width(), 14);
+        m_windowControls->raise();
+    }
+}
+
 // 直接在主窗口空白区域按下左键时，记录鼠标与窗口左上角的偏移量。
 void MainWindow::mousePressEvent(QMouseEvent *event)
 {
-    if (event->button() == Qt::LeftButton)
+    if (event->button() == Qt::LeftButton && !isMaximized() && !isFullScreen())
     {
         const QPoint globalPosition = event->globalPosition().toPoint();
         const Qt::Edges edges = resizeEdgesAt(globalPosition);
@@ -340,7 +359,8 @@ bool MainWindow::eventFilter(QObject *watched, QEvent *event)
                 }
 
                 // 只有页面背景和页面栈本身负责拖动窗口；普通控件保留自己的交互。
-                if (watched == m_pageStack || watched == m_pageStack->currentWidget())
+                if (!isMaximized() && !isFullScreen() &&
+                    (watched == m_pageStack || watched == m_pageStack->currentWidget()))
                 {
                     m_dragging = true;
                     m_dragOffset = globalPosition - frameGeometry().topLeft();

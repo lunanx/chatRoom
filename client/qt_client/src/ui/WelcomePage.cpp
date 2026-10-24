@@ -1,11 +1,12 @@
 #include "WelcomePage.h"
+#include "WindowTopControls.h"
 
 #include <QFile>
 #include <QLabel>
 #include <QPaintEvent>
+#include <QResizeEvent>
 #include <QPainter>
 #include <QPushButton>
-#include <QHBoxLayout>
 #include <QVBoxLayout>
 
 namespace
@@ -35,39 +36,9 @@ WelcomePage::WelcomePage(QWidget *parent)
     rootLayout->setSizeConstraint(QLayout::SetNoConstraint);
     rootLayout->setSpacing(0);
 
-    // 仅保留窗口控制按钮，不再显示独立的顶部导航栏/标题栏。
-    auto *windowControls = new QWidget(this);
-    auto *controlsLayout = new QHBoxLayout(windowControls);
-    controlsLayout->setContentsMargins(0, 0, 0, 0);
-    controlsLayout->setSpacing(8);
-    const auto makeControl = [this, windowControls](const QString &text, const QString &name)
-    {
-        auto *button = new QPushButton(text, windowControls);
-        button->setObjectName(name);
-        button->setFixedSize(30, 30);
-        button->setCursor(Qt::PointingHandCursor);
-        button->setStyleSheet(QStringLiteral(
-            "QPushButton { color: #625A7D; background: rgba(255,255,255,180); "
-            "border: 1px solid rgba(109,88,172,45); border-radius: 15px; font-size: 15px; }"
-            "QPushButton:hover { background: #E9E3FF; }"));
-        return button;
-    };
-    auto *minButton = makeControl(QStringLiteral("−"), QStringLiteral("windowMinButton"));
-    auto *maxButton = makeControl(QStringLiteral("□"), QStringLiteral("windowMaxButton"));
-    auto *closeButton = makeControl(QStringLiteral("×"), QStringLiteral("windowCloseButton"));
-    controlsLayout->addStretch(1);
-    controlsLayout->addWidget(minButton);
-    controlsLayout->addWidget(maxButton);
-    controlsLayout->addWidget(closeButton);
-    rootLayout->addWidget(windowControls, 0, Qt::AlignRight | Qt::AlignTop);
-
-    connect(minButton, &QPushButton::clicked, this, [this]() { window()->showMinimized(); });
-    connect(maxButton, &QPushButton::clicked, this, [this]()
-    {
-        if (window()->isMaximized()) window()->showNormal();
-        else window()->showMaximized();
-    });
-    connect(closeButton, &QPushButton::clicked, this, [this]() { window()->close(); });
+    // 控制按钮直接放在页面右上角，不占用正文的布局空间。
+    m_windowControls = createWindowTopControls(this, window());
+    m_windowControls->raise();
 
     auto *logo = new QLabel(QStringLiteral("G"), this);
     logo->setObjectName(QStringLiteral("welcomeMark"));
@@ -124,7 +95,7 @@ void WelcomePage::paintEvent(QPaintEvent *event)
     QPainter painter(this);
     painter.setRenderHint(QPainter::Antialiasing, true);
 
-    // 页面底色和两处径向光晕，对应 HTML 的 --canvas-gradient。
+    // 欢迎页背景铺满整个矩形客户区，窗口四角不做圆角裁剪。
     painter.fillRect(rect(), QColor(QStringLiteral("#F5F5FA")));
 
     QRadialGradient upperGlow(
@@ -141,4 +112,15 @@ void WelcomePage::paintEvent(QPaintEvent *event)
     lowerGlow.setColorAt(0.0, QColor(201, 190, 255, 26));
     lowerGlow.setColorAt(1.0, QColor(201, 190, 255, 0));
     painter.fillRect(rect(), lowerGlow);
+}
+
+void WelcomePage::resizeEvent(QResizeEvent *event)
+{
+    QWidget::resizeEvent(event);
+    if (m_windowControls != nullptr)
+    {
+        // 距离窗口上边和右边各保留 14/18px，按钮悬浮在页面背景上。
+        m_windowControls->move(width() - 18 - m_windowControls->width(), 14);
+        m_windowControls->raise();
+    }
 }

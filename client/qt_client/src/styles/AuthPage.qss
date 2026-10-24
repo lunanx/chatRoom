@@ -7,12 +7,7 @@ QWidget#authPage {
 QWidget#authCard {
     background-color: #FCFBFF;
     border: none;
-    border-radius: 32px;
-}
-
-QWidget#authBrandPanel {
-    border-top-left-radius: 31px;
-    border-bottom-left-radius: 31px;
+    border-radius: 0;
 }
 
 QLabel#authMiniMark {
@@ -61,8 +56,6 @@ QLabel#authBrandFooter {
 
 QWidget#authFormPanel {
     background-color: #FCFBFF;
-    border-top-right-radius: 31px;
-    border-bottom-right-radius: 31px;
 }
 
 QLabel#authFormEyebrow {

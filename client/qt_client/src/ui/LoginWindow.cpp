@@ -4,6 +4,7 @@
 #include "ui/AuthPage.h"
 
 #include <QEvent>
+#include <QFrame>
 #include <QMouseEvent>
 #include <QStackedWidget>
 #include <QWidget>
@@ -15,11 +16,15 @@ LoginWindow::LoginWindow(QWidget *parent)
     setWindowTitle(QStringLiteral("Go聊"));
     // 去掉系统标题栏，窗口按钮由欢迎页/登录注册页自己显示。
     setWindowFlags(Qt::Window | Qt::FramelessWindowHint);
-    // 允许窗口四角透明，显示页面自身的圆角，而不是系统窗口边框。
-    setAttribute(Qt::WA_TranslucentBackground, true);
+    // 窗口使用普通不透明客户区，四角为直角；不设置透明窗口遮罩，避免最大化时露出屏幕边缘。
     // 欢迎页采用紧凑尺寸；进入登录/注册页后再调整到表单所需大小。
     setMinimumSize(0, 0);
     resize(400, 500);
+
+    // 页面栈铺满窗口客户区，不添加额外边框。
+    m_pageStack->setFrameShape(QFrame::NoFrame);
+    m_pageStack->setStyleSheet(QStringLiteral(
+        "QStackedWidget { background: transparent; border: none; }"));
 
     // 创建欢迎页和登录/注册页。
     m_welcomePage = new WelcomePage(m_pageStack);
@@ -71,7 +76,7 @@ bool LoginWindow::eventFilter(QObject *watched, QEvent *event)
         if (event->type() == QEvent::MouseButtonPress)
         {
             auto *mouseEvent = static_cast<QMouseEvent *>(event);
-            if (mouseEvent->button() == Qt::LeftButton)
+            if (mouseEvent->button() == Qt::LeftButton && !isMaximized() && !isFullScreen())
             {
                 m_dragging = true;
                 m_dragOffset = mouseEvent->globalPosition().toPoint() - frameGeometry().topLeft();

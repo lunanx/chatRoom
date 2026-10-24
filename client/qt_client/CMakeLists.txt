@@ -64,6 +64,7 @@ add_executable(ChatRoomClient
     resources/pages.qrc
     src/ui/LoginWindow.h
     src/ui/LoginWindow.cpp
+    src/ui/WindowTopControls.h
 )
 
 # 引用项目公共协议定义和已有的第三方头文件

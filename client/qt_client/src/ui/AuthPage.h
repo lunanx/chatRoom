@@ -6,6 +6,8 @@ class QCheckBox;
 class QLineEdit;
 class QPushButton;
 class QEvent;
+class QResizeEvent;
+class QWidget;
 
 // Go聊登录/注册页：左侧品牌介绍，右侧账号表单。
 class AuthPage : public QWidget
@@ -29,6 +31,7 @@ signals:
 protected:
     // 监听输入框焦点变化，为聚焦状态启用紫色柔光。
     bool eventFilter(QObject *watched, QEvent *event) override;
+    void resizeEvent(QResizeEvent *event) override;
 
 private:
     QLineEdit *m_accountEdit = nullptr;
@@ -36,4 +39,5 @@ private:
     QCheckBox *m_rememberCheckBox = nullptr;
     QPushButton *m_loginButton = nullptr;
     QPushButton *m_registerButton = nullptr;
+    QWidget *m_windowControls = nullptr;
 };

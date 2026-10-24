@@ -13,7 +13,7 @@ class QResizeEvent;
 class QStackedWidget;
 class QWidget;
 
-// 客户端主窗口：管理欢迎页、登录页和聊天工作台三个页面。
+// 客户端主窗口：展示三栏聊天工作台，并统一矩形窗口与窗口控制按钮。
 class MainWindow : public QMainWindow
 {
     Q_OBJECT
@@ -22,8 +22,9 @@ public:
     explicit MainWindow(QWidget *parent = nullptr);
 
 protected:
-    // 绘制窗口底色与紫色光晕，模拟最终 HTML 设计稿中的页面背景。
+    // 绘制铺满窗口的底色与紫色光晕。
     void paintEvent(QPaintEvent *event) override;
+    void resizeEvent(QResizeEvent *event) override;
     // 无系统标题栏时，允许用户拖动窗口。
     void mousePressEvent(QMouseEvent *event) override;
     void mouseMoveEvent(QMouseEvent *event) override;
@@ -43,6 +44,7 @@ private:
     void updateResizeCursor(QWidget *watched, const QPoint &globalPosition);
 
     QStackedWidget *m_pageStack = nullptr; // 页面栈，只显示当前页面。
+    QWidget *m_windowControls = nullptr;   // 右上角与背景融合的圆点控制按钮。
     QPoint m_dragOffset;              // 鼠标按下位置相对窗口左上角的偏移量。
     bool m_dragging = false;          // 当前是否正在拖动窗口。
     bool m_resizing = false;          // 当前是否正在拖动窗口边缘缩放。
