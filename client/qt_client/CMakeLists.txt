@@ -33,6 +33,10 @@ add_executable(ChatRoomClient
     src/network/TcpClient.h
     src/network/TcpClient.cpp
 
+    # 应用控制器：统一管理窗口切换和登录/注册网络请求
+    src/controller/AppController.h
+    src/controller/AppController.cpp
+
     # 主窗口
     src/ui/MainWindow.h
     src/ui/MainWindow.cpp
@@ -65,6 +69,14 @@ add_executable(ChatRoomClient
     src/ui/LoginWindow.h
     src/ui/LoginWindow.cpp
     src/ui/WindowTopControls.h
+)
+
+# 将客户端独立配置复制到可执行文件旁，支持单配置和多配置生成器。
+add_custom_command(TARGET ChatRoomClient POST_BUILD
+    COMMAND ${CMAKE_COMMAND} -E copy_if_different
+        "${CMAKE_CURRENT_SOURCE_DIR}/config/client.conf"
+        "$<TARGET_FILE_DIR:ChatRoomClient>/client.conf"
+    COMMENT "Copying client.conf beside ChatRoomClient"
 )
 
 # 引用项目公共协议定义和已有的第三方头文件
