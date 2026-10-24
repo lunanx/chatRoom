@@ -81,3 +81,6 @@ Testing/
 
 # 不上传自己的.vscode配置
 .vscode
+
+# 忽略所有由 rcc 自动生成的 qrc 资源 C++ 文件
+qrc_*.cpp
