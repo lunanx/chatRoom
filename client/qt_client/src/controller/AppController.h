@@ -82,7 +82,7 @@ private:
     // 在尚未连接且当前没有正在连接时，发起异步连接。
     void ensureServerConnection();
 
-    // 统一显示错误或普通提示，避免每个槽都重复编写 QMessageBox 代码。
+    // 统一显示错误或普通提示，避免原生对话框破坏紫灰沉浸主题。
     void showResponseMessage(const QString &title,
                              const QString &message,
                              bool isError);

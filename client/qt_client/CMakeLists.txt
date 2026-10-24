@@ -41,6 +41,10 @@ add_executable(ChatRoomClient
     src/ui/MainWindow.h
     src/ui/MainWindow.cpp
 
+    # 紫灰主题提示框，替代原生 QMessageBox
+    src/ui/ModernMessageBox.h
+    src/ui/ModernMessageBox.cpp
+
     # 左侧导航栏及其 QSS 资源
     src/ui/SideBar.h
     src/ui/SideBar.cpp

@@ -4,11 +4,11 @@
 #include "ui/LoginWindow.h"
 #include "ui/MainWindow.h"
 #include "protocol/ProtocolBody.h"
+#include "ui/ModernMessageBox.h"
 
 #include <QCoreApplication>
 #include <QJsonDocument>
 #include <QJsonObject>
-#include <QMessageBox>
 #include <QSettings>
 #include <QWidget>
 
@@ -453,13 +453,6 @@ void AppController::showResponseMessage(const QString &title,
         parentWidget = m_mainWindow;
     }
 
-    // 错误提示使用 warning，普通结果提示使用 information。
-    if (isError)
-    {
-        QMessageBox::warning(parentWidget, title, message);
-    }
-    else
-    {
-        QMessageBox::information(parentWidget, title, message);
-    }
+    // 使用自定义提示框，避免原生 QMessageBox 的系统边框破坏紫灰沉浸主题。
+    ModernMessageBox::showMessage(parentWidget, title, message, isError);
 }
