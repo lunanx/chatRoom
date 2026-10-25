@@ -3,6 +3,8 @@
 #include "repository/UserRepository.h"
 #include <algorithm>
 #include <iostream>
+#include <vector>
+#include <utility>
 
 namespace
 {
@@ -22,12 +24,17 @@ namespace
     protocolHeader::CommandType setResponse(
         std::string &responseBody,
         protocolHeader::CommandType command,
-        const std::string &message)
+        const std::string &message,
+        nlohmann::json data = nullptr)
     {
-        const nlohmann::json response = {
+        nlohmann::json response = {
             {protocolBody::CODE, static_cast<std::uint16_t>(command)},
             {protocolBody::MESSAGE, message}};
 
+        if (!data.is_null())
+        {
+            response[protocolBody::DATA] = std::move(data);
+        }
         responseBody = response.dump();
         return command;
     }
@@ -69,8 +76,16 @@ ConversationCreateResult ConversationService::createConversation(
     {
         if (type == 1)
         {
-            std::uint64_t userId1 = data[protocolBody::USER_ID_1].get<std::uint64_t>();
-            std::uint64_t userId2 = data[protocolBody::USER_ID_2].get<std::uint64_t>();
+            // 客户端新建/打开私聊只需要传对方 ID；自己的身份必须取自服务端连接。
+            std::uint64_t userId1 = authenticatedUserId;
+            std::uint64_t userId2 = data.contains(protocolBody::TARGET_USER_ID)
+                                        ? data[protocolBody::TARGET_USER_ID].get<std::uint64_t>()
+                                        : data[protocolBody::USER_ID_2].get<std::uint64_t>();
+            if (!data.contains(protocolBody::TARGET_USER_ID))
+            {
+                userId1 = data[protocolBody::USER_ID_1].get<std::uint64_t>();
+                userId2 = data[protocolBody::USER_ID_2].get<std::uint64_t>();
+            }
             // 私聊双方排序，确保同一对用户不会产生 A-B 与 B-A 两条会话。
             if (userId1 > userId2)
             {
@@ -185,6 +200,43 @@ ConversationCreateResult ConversationService::createConversation(
     return {responseCommand, idResult.conversationId, lastSeqResult.lastSeq};
 }
 
+protocolHeader::CommandType ConversationService::listConversations(
+    std::string &responseBody,
+    std::uint64_t authenticatedUserId)
+{
+    using protocolHeader::CommandType;
+    if (authenticatedUserId == 0)
+    {
+        return setResponse(responseBody, CommandType::QUERY_CONVERSATION_LIST_FAILED,
+                           "当前登录用户无效，请重新登录");
+    }
+
+    std::vector<ConversationListEntry> conversations;
+    const auto status = ConversationRepository::getConversationsForUser(
+        authenticatedUserId, conversations);
+    if (status == ConversationQueryStatus::Error)
+    {
+        return setResponse(responseBody, CommandType::QUERY_CONVERSATION_LIST_FAILED,
+                           "服务器暂时无法查询会话列表，请稍后重试");
+    }
+
+    nlohmann::json items = nlohmann::json::array();
+    for (const auto &item : conversations)
+    {
+        items.push_back({{protocolBody::CONVERSATION_ID, item.conversationId},
+                         {protocolBody::TYPE, item.type},
+                         {protocolBody::LAST_SEQ, item.lastSeq},
+                         {protocolBody::TARGET_USER_ID, item.targetUserId},
+                         {protocolBody::USERNAME, item.targetUsername},
+                         {protocolBody::DISPLAY_NAME, item.displayName},
+                         {protocolBody::AVATAR, item.avatar},
+                         {protocolBody::LAST_MESSAGE, item.lastMessage},
+                         {protocolBody::LAST_TIME, item.lastTime}});
+    }
+    return setResponse(responseBody, CommandType::QUERY_CONVERSATION_LIST_SUCCESS,
+                       "查询会话列表成功", std::move(items));
+}
+
 ConversationCreateRequestResult ConversationService::validateConversationCreateRequest(const std::string &body, nlohmann::json &data)
 {
     try
@@ -213,10 +265,15 @@ ConversationCreateRequestResult ConversationService::validateConversationCreateR
     const auto type = data[protocolBody::TYPE].get<std::uint64_t>();
     if (type == 1)
     {
-        if (!data.contains(protocolBody::USER_ID_1) || !isUnsignedInteger(data[protocolBody::USER_ID_1]) ||
-            !data.contains(protocolBody::USER_ID_2) || !isUnsignedInteger(data[protocolBody::USER_ID_2]))
+        const bool targetFieldProvided = data.contains(protocolBody::TARGET_USER_ID);
+        const bool hasTargetUserId = targetFieldProvided &&
+                                     isUnsignedInteger(data[protocolBody::TARGET_USER_ID]);
+        const bool hasLegacyUserPair = !targetFieldProvided &&
+                                       data.contains(protocolBody::USER_ID_1) && isUnsignedInteger(data[protocolBody::USER_ID_1]) &&
+                                       data.contains(protocolBody::USER_ID_2) && isUnsignedInteger(data[protocolBody::USER_ID_2]);
+        if (!hasTargetUserId && !hasLegacyUserPair)
         {
-            printf("是私聊，但不存在两个用户名或类型不正确\n");
+            printf("私聊请求缺少有效的 target_user_id 或用户 ID 对\n");
             return ConversationCreateRequestResult::RequestError;
         }
         return ConversationCreateRequestResult::IsPrivateConversation;
@@ -226,7 +283,7 @@ ConversationCreateRequestResult ConversationService::validateConversationCreateR
     {
         if (!data.contains(protocolBody::GROUP_ID) || !isUnsignedInteger(data[protocolBody::GROUP_ID]))
         {
-            printf("是群聊聊，但不存在群组id或类型不正确\n");
+            printf("是群聊，但不存在群组id或类型不正确\n");
             return ConversationCreateRequestResult::RequestError;
         }
         return ConversationCreateRequestResult::IsGroupConversation;

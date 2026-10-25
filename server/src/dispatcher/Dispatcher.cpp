@@ -19,6 +19,8 @@ namespace
         case protocolHeader::CommandType::GROUP_MESSAGE_SEND:
         case protocolHeader::CommandType::PRIVATE_MESSAGE_SEND:
             return protocolHeader::CommandType::MESSAGE_SEND_FAILED;
+        case protocolHeader::CommandType::CHATCREATE_REQUEST:
+            return protocolHeader::CommandType::PRIVATECREATE_FAILED;
         case protocolHeader::CommandType::FRIEND_REQUEST_SEND:
             return protocolHeader::CommandType::FRIEND_REQUEST_SEND_FAILED;
         case protocolHeader::CommandType::QUERY_PENDING_FRIEND_LIST_REQUEST:
@@ -27,6 +29,8 @@ namespace
             return protocolHeader::CommandType::FRIEND_REQUEST_HANDLE_FAILED;
         case protocolHeader::CommandType::QUERY_FRIEND_LIST_REQUEST:
             return protocolHeader::CommandType::QUERY_FRIEND_LIST_FAILED;
+        case protocolHeader::CommandType::QUERY_CONVERSATION_LIST_REQUEST:
+            return protocolHeader::CommandType::QUERY_CONVERSATION_LIST_FAILED;
         default:
             return protocolHeader::CommandType::UNKNOWN;
         }
@@ -162,7 +166,21 @@ DispatchResult Dispatcher::dispatch(const protocolHeader::PacketFrame &frame, Cl
                 responseCommand = MessageService::MessageHistoryQuery(frame.m_body, responseBody, user->userId);
             }
         }
-        //好友请求--A->B
+        // 查询会话列表
+        else if (command == protocolHeader::CommandType::QUERY_CONVERSATION_LIST_REQUEST)
+        {
+            if (!session.isAuthenticated())
+            {
+                responseCommand = protocolHeader::CommandType::QUERY_CONVERSATION_LIST_FAILED;
+                responseBody = makeResponseBody(responseCommand, "当前没有账号登录");
+            }
+            else
+            {
+                const auto &user = session.getAuthenticatedUser();
+                responseCommand = ConversationService::listConversations(responseBody, user->userId);
+            }
+        }
+        // 好友请求--A->B
         else if (command == protocolHeader::CommandType::FRIEND_REQUEST_SEND)
         {
             if (!session.isAuthenticated())
@@ -177,7 +195,7 @@ DispatchResult Dispatcher::dispatch(const protocolHeader::PacketFrame &frame, Cl
                     frame.m_body, responseBody, user->userId);
             }
         }
-        //查询好友请求列表--B->A
+        // 查询好友请求列表--B->A
         else if (command == protocolHeader::CommandType::QUERY_PENDING_FRIEND_LIST_REQUEST)
         {
             if (!session.isAuthenticated())
@@ -191,7 +209,7 @@ DispatchResult Dispatcher::dispatch(const protocolHeader::PacketFrame &frame, Cl
                 responseCommand = FriendService::listFriendRequests(responseBody, user->userId);
             }
         }
-        //处理好友请求--B->A
+        // 处理好友请求--B->A
         else if (command == protocolHeader::CommandType::FRIEND_REQUEST_HANDLE_REQUEST)
         {
             if (!session.isAuthenticated())
@@ -206,7 +224,7 @@ DispatchResult Dispatcher::dispatch(const protocolHeader::PacketFrame &frame, Cl
                     frame.m_body, responseBody, user->userId);
             }
         }
-        //查询好友列表
+        // 查询好友列表
         else if (command == protocolHeader::CommandType::QUERY_FRIEND_LIST_REQUEST)
         {
             if (!session.isAuthenticated())

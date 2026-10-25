@@ -35,6 +35,13 @@ public:
         std::string &responseBody,
         const std::uint64_t &authenticatedUserId);
 
+    /*
+        查询当前认证用户可访问的私聊和群聊会话列表。
+    */
+    static protocolHeader::CommandType listConversations(
+        std::string &responseBody,
+        std::uint64_t authenticatedUserId);
+
 private:
     /*
         检查会话请求的JSON是否符合要求

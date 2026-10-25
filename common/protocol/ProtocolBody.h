@@ -49,8 +49,12 @@ namespace protocolBody
     constexpr const char *TYPE = "type";
     constexpr const char *USER_ID_1 = "user_id_1";
     constexpr const char *USER_ID_2 = "user_id_2";
+    constexpr const char *TARGET_USER_ID = "target_user_id"; // 创建或打开私聊时的对方用户 ID
     constexpr const char *GROUP_ID = "group_id";
     constexpr const char *LAST_SEQ = "last_seq";
+    constexpr const char *DISPLAY_NAME = "display_name";
+    constexpr const char *LAST_MESSAGE = "last_message";
+    constexpr const char *LAST_TIME = "last_time";
 
     /*
         历史消息相关

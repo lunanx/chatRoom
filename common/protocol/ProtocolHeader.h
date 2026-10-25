@@ -146,7 +146,14 @@ namespace protocolHeader
         */
         QUERY_FRIEND_LIST_REQUEST = 35,
         QUERY_FRIEND_LIST_SUCCESS = 36,
-        QUERY_FRIEND_LIST_FAILED = 37
+        QUERY_FRIEND_LIST_FAILED = 37,
+        
+        /*
+            查询当前登录用户的会话列表
+        */
+        QUERY_CONVERSATION_LIST_REQUEST = 38,
+        QUERY_CONVERSATION_LIST_SUCCESS = 39,
+        QUERY_CONVERSATION_LIST_FAILED = 40
     };
     /*
        单个Body允许的最大长度

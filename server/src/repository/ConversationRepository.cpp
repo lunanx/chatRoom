@@ -2,6 +2,8 @@
 
 #include <iostream>
 #include <string>
+#include <vector>
+#include <utility>
 
 namespace
 {
@@ -168,3 +170,83 @@ ConversationQueryStatus ConversationRepository::checkActiveGroupMember(std::uint
         return ConversationQueryStatus::Error;
     }
 }
+
+ConversationQueryStatus ConversationRepository::getConversationsForUser(
+    std::uint64_t userId,
+    std::vector<ConversationListEntry> &conversations)
+{
+    conversations.clear();
+    if (userId == 0)
+    {
+        return ConversationQueryStatus::NotFound;
+    }
+
+    DatabaseManager dbManager;
+    if (!dbManager.connect())
+    {
+        std::cerr << "数据库连接失败，无法查询会话列表\n";
+        return ConversationQueryStatus::Error;
+    }
+
+    // 私聊名称显示对方昵称，群聊名称显示群名；没有消息的会话也会被列出。
+    // 查询依据是当前已认证用户 ID，不接受客户端自行声明查询谁的会话。
+    auto queryResult = dbManager.query(
+        "SELECT c.id, c.type, c.last_seq, "
+        "CASE WHEN c.type = 1 THEN "
+        "  CASE WHEN c.user_id_1 = ? THEN u2.nickname ELSE u1.nickname END "
+        "  ELSE g.name END AS display_name, "
+        "COALESCE(CASE WHEN c.type = 1 THEN "
+        "  CASE WHEN c.user_id_1 = ? THEN u2.avatar ELSE u1.avatar END "
+        "  ELSE g.avatar END, '') AS avatar, "
+        "CASE WHEN c.type = 1 THEN "
+        "  CASE WHEN c.user_id_1 = ? THEN u2.id ELSE u1.id END "
+        "  ELSE 0 END AS target_user_id, "
+        "CASE WHEN c.type = 1 THEN "
+        "  CASE WHEN c.user_id_1 = ? THEN u2.username ELSE u1.username END "
+        "  ELSE '' END AS target_username, "
+        "COALESCE(lm.content, '') AS last_message, "
+        "DATE_FORMAT(COALESCE(lm.created_at, c.updated_at, c.created_at), '%Y-%m-%d %H:%i:%s') AS last_time "
+        "FROM Conversation c "
+        "LEFT JOIN `User` u1 ON u1.id = c.user_id_1 "
+        "LEFT JOIN `User` u2 ON u2.id = c.user_id_2 "
+        "LEFT JOIN `Group` g ON g.id = c.group_id "
+        "LEFT JOIN GroupMember gm ON gm.group_id = c.group_id AND gm.user_id = ? "
+        "LEFT JOIN Message lm ON lm.conversation_id = c.id "
+        "  AND lm.seq = c.last_seq AND lm.status = 1 "
+        "WHERE ((c.type = 1 AND (c.user_id_1 = ? OR c.user_id_2 = ?) "
+        "         AND u1.status = 1 AND u2.status = 1) "
+        "    OR (c.type = 2 AND g.status = 1 AND gm.user_id IS NOT NULL)) "
+        "ORDER BY COALESCE(lm.created_at, c.updated_at, c.created_at) DESC, c.id DESC",
+        userId, userId, userId, userId, userId, userId, userId);
+
+    if (!queryResult.succeeded || !queryResult.result)
+    {
+        return ConversationQueryStatus::Error;
+    }
+
+    try
+    {
+        while (queryResult.result->next())
+        {
+            ConversationListEntry entry;
+            entry.conversationId = readUInt64(*queryResult.result, 1);
+            entry.type = static_cast<std::uint16_t>(readUInt64(*queryResult.result, 2));
+            entry.lastSeq = readUInt64(*queryResult.result, 3);
+            entry.displayName = queryResult.result->getString(4).c_str();
+            entry.avatar = queryResult.result->getString(5).c_str();
+            entry.targetUserId = readUInt64(*queryResult.result, 6);
+            entry.targetUsername = queryResult.result->getString(7).c_str();
+            entry.lastMessage = queryResult.result->getString(8).c_str();
+            entry.lastTime = queryResult.result->getString(9).c_str();
+            conversations.push_back(std::move(entry));
+        }
+        return ConversationQueryStatus::Found;
+    }
+    catch (const std::exception &e)
+    {
+        std::cerr << "读取会话列表失败: " << e.what() << '\n';
+        conversations.clear();
+        return ConversationQueryStatus::Error;
+    }
+}
+
