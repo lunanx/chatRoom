@@ -335,9 +335,9 @@ QueryHistoricalMessageResult MessageRepository::queryHistoricalMessage(const std
             "SELECT m.seq, m.content, m.sender_id,u.username "
             "FROM Message m "
             "INNER JOIN User u ON u.id = m.sender_id "
-            "WHERE conversation_id = ? "
-            "  AND status = 1 "
-            "  AND seq < ? "
+            "WHERE m.conversation_id = ? "
+            "  AND m.status = 1 "
+            "  AND m.seq < ? "
             "ORDER BY m.seq DESC LIMIT 5",
             conversation_id,
             cursorSeq);
