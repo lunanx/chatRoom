@@ -41,7 +41,16 @@ add_executable(ChatRoomClient
     src/ui/MainWindow.h
     src/ui/MainWindow.cpp
 
-    # 紫灰主题提示框，替代原生 QMessageBox
+    # 聊天消息数据模型（按会话保存并去重）
+    src/model/ChatMessageRecord.h
+    src/ui/MessageListModel.h
+    src/ui/MessageListModel.cpp
+    src/ui/MessageFilterProxyModel.h
+    src/ui/MessageFilterProxyModel.cpp
+    src/ui/MessageItemDelegate.h
+    src/ui/MessageItemDelegate.cpp
+
+    # 现代化紫灰主题提示框，替代原生 QMessageBox
     src/ui/ModernMessageBox.h
     src/ui/ModernMessageBox.cpp
 
@@ -125,4 +134,27 @@ target_link_libraries(ProtocolCodecTest
 add_test(
     NAME ProtocolCodecEncodeTest
     COMMAND ProtocolCodecTest
+)
+
+# 消息模型测试：验证消息排序、去重、会话隔离和账号状态清理。
+add_executable(MessageModelTest
+    tests/MessageModelTest.cpp
+    src/model/ChatMessageRecord.h
+    src/ui/MessageListModel.h
+    src/ui/MessageListModel.cpp
+    src/ui/MessageFilterProxyModel.h
+    src/ui/MessageFilterProxyModel.cpp
+)
+
+target_include_directories(MessageModelTest
+    PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/src"
+)
+
+target_link_libraries(MessageModelTest
+    PRIVATE Qt6::Core
+)
+
+add_test(
+    NAME MessageModelTest
+    COMMAND MessageModelTest
 )

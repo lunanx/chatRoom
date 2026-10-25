@@ -1,5 +1,8 @@
 #include "ChatArea.h"
 #include "InputBar.h"
+#include "MessageListModel.h"
+#include "MessageFilterProxyModel.h"
+#include "MessageItemDelegate.h"
 
 #include <QFile>
 #include <QHBoxLayout>
@@ -15,6 +18,7 @@
 #include <QVBoxLayout>
 #include <QWidget>
 #include <QDebug>
+#include <QTimer>
 
 namespace
 {
@@ -113,6 +117,19 @@ ChatArea::ChatArea(QWidget *parent)
     m_messageListView->setVerticalScrollMode(QAbstractItemView::ScrollPerPixel);
     m_messageListView->setHorizontalScrollBarPolicy(Qt::ScrollBarAlwaysOff);
     m_messageListView->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Expanding);
+    m_messageListView->setUniformItemSizes(false);
+    m_messageListView->setSpacing(0);
+    m_messageListView->setFlow(QListView::TopToBottom);
+    m_messageListView->setWrapping(false);
+
+    // 消息列表使用 Qt 模型/视图结构：模型保存数据，代理模型按当前会话过滤，
+    // Delegate 负责绘制气泡。不会为每条消息创建独立 QWidget。
+    m_messageModel = new MessageListModel(this);
+    m_messageFilterModel = new MessageFilterProxyModel(this);
+    m_messageFilterModel->setSourceModel(m_messageModel);
+    m_messageListView->setModel(m_messageFilterModel);
+    m_messageDelegate = new MessageItemDelegate(m_messageListView);
+    m_messageListView->setItemDelegate(m_messageDelegate);
 
     // 输入区放在 QSplitter 的下半部分，初始高度约 148px，比之前更紧凑。
     m_inputBar = new InputBar(m_contentSplitter);
@@ -195,3 +212,56 @@ void ChatArea::clearMessageInput()
     }
 }
 
+
+
+void ChatArea::setCurrentConversationId(quint64 conversationId)
+{
+    m_currentConversationId = conversationId;
+    m_messageFilterModel->setConversationId(conversationId);
+
+    // 会话切换后定位到最新一条消息；首次切换或空会话时不会访问无效索引。
+    QTimer::singleShot(0, this, [this]()
+    {
+        const int lastRow = m_messageFilterModel->rowCount() - 1;
+        if (lastRow >= 0)
+        {
+            m_messageListView->scrollTo(
+                m_messageFilterModel->index(lastRow, 0),
+                QAbstractItemView::PositionAtBottom);
+        }
+    });
+}
+
+void ChatArea::setCurrentUsername(const QString &username)
+{
+    m_messageModel->setCurrentUsername(username);
+    m_messageListView->viewport()->update();
+}
+
+void ChatArea::clearMessages()
+{
+    if (m_messageModel != nullptr)
+    {
+        m_messageModel->clearMessages();
+    }
+}
+
+bool ChatArea::appendMessage(const ChatMessageRecord &message)
+{
+    const bool inserted = m_messageModel->appendMessage(message);
+    if (inserted && message.conversationId == m_currentConversationId)
+    {
+        // 等模型与代理视图完成布局后再滚动，确保新插入的消息出现在底部。
+        QTimer::singleShot(0, this, [this]()
+        {
+            const int lastRow = m_messageFilterModel->rowCount() - 1;
+            if (lastRow >= 0)
+            {
+                m_messageListView->scrollTo(
+                    m_messageFilterModel->index(lastRow, 0),
+                    QAbstractItemView::PositionAtBottom);
+            }
+        });
+    }
+    return inserted;
+}

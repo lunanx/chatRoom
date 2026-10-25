@@ -70,6 +70,11 @@ private:
     void returnToLoginWindow();
 
     // 停止指定消息请求的超时计时器，或清理所有消息请求计时器。
+    // 服务端消息推送使用 request_id=0，不属于任何待处理请求，需要单独解析。
+    void handleIncomingMessagePush(protocolHeader::CommandType command,
+                                   quint64 requestId,
+                                   const QByteArray &jsonBody);
+
     void stopMessageRequestTimer(quint64 requestId);
     void clearMessageRequestTimers();
 

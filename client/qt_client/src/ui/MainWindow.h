@@ -14,6 +14,7 @@ class QResizeEvent;
 class QStackedWidget;
 class QWidget;
 class ChatArea;
+struct ChatMessageRecord;
 
 // 客户端主窗口：展示三栏聊天工作台，并统一矩形窗口与窗口控制按钮。
 class MainWindow : public QMainWindow
@@ -27,6 +28,12 @@ public:
     void setMessageStatus(const QString &message, bool isError = false);
     // TCP 层接受消息发送请求后，清空编辑框中的已发送文本。
     void clearMessageInput();
+    // 设置当前登录用户名，以便气泡正确区分自己和对方的消息。
+    void setCurrentUsername(const QString &username);
+    // 将服务端推送的消息交给聊天区模型；返回 false 表示重复或无效消息。
+    bool appendMessage(const ChatMessageRecord &message);
+    // 退出登录、断线或会话状态失效时清理消息内存。
+    void clearMessages();
 
 signals:
     // 用户从侧边栏“更多”菜单中选择退出登录时发出。

@@ -5,14 +5,42 @@
 #include "ui/MainWindow.h"
 #include "ui/ModernMessageBox.h"
 #include "protocol/ProtocolBody.h"
+#include "model/ChatMessageRecord.h"
 
 #include <QCoreApplication>
+#include <QDateTime>
+#include <QDebug>
 #include <QJsonDocument>
 #include <QJsonObject>
 #include <QJsonValue>
 #include <QSettings>
 #include <QWidget>
 #include <QUuid>
+
+namespace
+{
+    // 当前服务器以 JSON 整数发送 ID 和 seq。toInteger() 只接受可以无损表示的整数，
+    // 避免先转成 double 后再强转整数时，悄悄改变较大的数据库 ID。
+    bool readPositiveJsonInteger(const QJsonObject &object,
+                                 const char *key,
+                                 quint64 &result)
+    {
+        const QJsonValue value = object.value(QString::fromLatin1(key));
+        if (!value.isDouble())
+        {
+            return false;
+        }
+
+        const qint64 number = value.toInteger(0);
+        if (number <= 0)
+        {
+            return false;
+        }
+
+        result = static_cast<quint64>(number);
+        return result > 0;
+    }
+}
 
 AppController::AppController(QObject *parent)
     : QObject(parent),
@@ -351,7 +379,17 @@ void AppController::onPacketReceived(quint16 command,
                                      quint64 requestId,
                                      const QByteArray &jsonBody)
 {
-    // requestId == 0 等无对应请求的服务端主动推送暂留给后续聊天阶段处理。
+    const auto receivedCommand = static_cast<protocolHeader::CommandType>(command);
+
+    // 当前服务器主动推送消息时固定使用 request_id=0。
+    // 必须先识别推送，再查找请求表；否则这类消息会被误当成“未知响应”直接丢弃。
+    if (receivedCommand == protocolHeader::CommandType::GROUP_MESSAGE_RECV ||
+        receivedCommand == protocolHeader::CommandType::PRIVATE_MESSAGE_RECV)
+    {
+        handleIncomingMessagePush(receivedCommand, requestId, jsonBody);
+        return;
+    }
+
     auto requestIt = m_requestsAwaitingResponse.find(requestId);
     if (requestIt == m_requestsAwaitingResponse.end())
     {
@@ -553,7 +591,7 @@ void AppController::onMessageSendRequested(const QString &text,
 
     const QString content = text.trimmed();
     const QByteArray utf8Content = content.toUtf8();
-    if (content.isEmpty())
+    if (content.trimmed().isEmpty())
     {
         return;
     }
@@ -645,6 +683,89 @@ void AppController::onLogoutRequested()
     sendRequest(request);
 }
 
+void AppController::handleIncomingMessagePush(protocolHeader::CommandType command,
+                                                   quint64 requestId,
+                                                   const QByteArray &jsonBody)
+{
+    // 服务端约定主动推送的 request_id 必须为 0。其他值意味着协议行为异常，
+    // 不把这个数据包混入普通请求响应流程。
+    if (requestId != 0)
+    {
+        qWarning() << "忽略 request_id 非 0 的消息推送:" << requestId;
+        return;
+    }
+
+    // 只有处于服务器确认的登录状态时，才接受聊天推送。
+    if (!m_isAuthenticated || m_isLoggingOut || m_mainWindow == nullptr)
+    {
+        qWarning() << "当前没有已认证的主窗口，忽略聊天消息推送";
+        return;
+    }
+
+    QJsonParseError parseError;
+    const QJsonDocument document = QJsonDocument::fromJson(jsonBody, &parseError);
+    if (parseError.error != QJsonParseError::NoError || !document.isObject())
+    {
+        m_mainWindow->setMessageStatus(QStringLiteral("收到无法解析的消息推送"), true);
+        qWarning() << "聊天推送 JSON 格式错误:" << parseError.errorString();
+        return;
+    }
+
+    const QJsonObject body = document.object();
+    ChatMessageRecord message;
+    if (!readPositiveJsonInteger(body, protocolBody::CONVERSATION_ID, message.conversationId) ||
+        !readPositiveJsonInteger(body, protocolBody::SERVER_MSG_ID, message.serverMessageId) ||
+        !readPositiveJsonInteger(body, protocolBody::USER_ID, message.senderId) ||
+        !readPositiveJsonInteger(body, protocolBody::SEQ, message.sequence))
+    {
+        m_mainWindow->setMessageStatus(QStringLiteral("消息推送缺少有效的会话或消息标识"), true);
+        qWarning() << "聊天推送 ID/seq 字段不合法";
+        return;
+    }
+
+    const QJsonValue usernameValue = body.value(QString::fromLatin1(protocolBody::USERNAME));
+    const QJsonValue contentValue = body.value(QString::fromLatin1(protocolBody::CONTENT));
+    const QJsonValue clientMessageIdValue =
+        body.value(QString::fromLatin1(protocolBody::CLIENT_MSG_ID));
+    const QJsonValue typeValue = body.value(QString::fromLatin1(protocolBody::TYPE));
+
+    if (!usernameValue.isString() || !contentValue.isString() ||
+        !clientMessageIdValue.isString() || !typeValue.isDouble())
+    {
+        m_mainWindow->setMessageStatus(QStringLiteral("消息推送的数据字段不完整"), true);
+        qWarning() << "聊天推送 username/content/client_msg_id/type 字段格式错误";
+        return;
+    }
+
+    const QString content = contentValue.toString();
+    const QString senderName = usernameValue.toString();
+    const QString clientMessageId = clientMessageIdValue.toString();
+    const int messageType = typeValue.toInt(-1);
+    if (messageType != 1 || content.isEmpty() ||
+        content.toUcs4().size() > 512 || content.toUtf8().size() > 2048 ||
+        senderName.trimmed().isEmpty() || clientMessageId.isEmpty() || clientMessageId.size() > 64)
+    {
+        // 当前项目只做文本消息；尚未实现的图片、文件等消息类型不会被误画成文本。
+        qWarning() << "忽略不支持或不合法的消息类型/内容/发送者标识:" << messageType;
+        return;
+    }
+
+    message.senderName = senderName;
+    message.clientMessageId = clientMessageId;
+    message.content = content;
+    message.timeText = QDateTime::currentDateTime().toString(QStringLiteral("HH:mm"));
+
+    // 消息模型按 conversation_id 隔离视图，并按 seq 排序；server_msg_id / client_msg_id 去重。
+    // 即使当前没有打开这条会话，消息仍保留在客户端模型中，切回会话后即可显示。
+    if (!m_mainWindow->appendMessage(message))
+    {
+        // 重复推送是正常的网络边界情况，静默忽略，不弹打扰用户的提示。
+        qDebug() << "忽略重复或无效的聊天消息:" << message.serverMessageId;
+    }
+
+    Q_UNUSED(command); // 私聊/群聊命令只用来区分协议事件，气泡样式不依赖会话类型。
+}
+
 void AppController::onLoginSucceeded()
 {
     // LoginWindow 的信号只能在服务器确认登录后触发，仍然检查状态以保护窗口切换。
@@ -662,6 +783,7 @@ void AppController::onLoginSucceeded()
                 this, &AppController::onMessageSendRequested);
     }
 
+    m_mainWindow->setCurrentUsername(m_currentAccount);
     m_mainWindow->show();
     m_mainWindow->raise();
     m_mainWindow->activateWindow();
@@ -711,6 +833,8 @@ void AppController::returnToLoginWindow()
     // 此方法不负责修改登录状态；调用者应先更新 m_isAuthenticated 和用户信息。
     if (m_mainWindow != nullptr)
     {
+        // 主窗口会在下次登录时复用，但内存消息不能跨账号保留。
+        m_mainWindow->clearMessages();
         m_mainWindow->hide();
     }
 

@@ -5,6 +5,7 @@
 #include "ui/ChatArea.h"
 #include "ui/SessionListPanel.h"
 #include "ui/SideBar.h"
+#include "model/ChatMessageRecord.h"
 
 #include <QEvent>
 #include <QFont>
@@ -132,6 +133,7 @@ QWidget *MainWindow::createChatWorkspacePage()
                         chatArea->setConversationInfo(session->name, session->avatarText, true);
                         m_currentConversationId = session->conversationId;
                         m_currentConversationIsGroup = session->group;
+                        chatArea->setCurrentConversationId(m_currentConversationId);
                         break;
                     }
                 }
@@ -142,6 +144,7 @@ QWidget *MainWindow::createChatWorkspacePage()
     {
         m_currentConversationId = firstSession->conversationId;
         m_currentConversationIsGroup = firstSession->group;
+        chatArea->setCurrentConversationId(m_currentConversationId);
         chatArea->setConversationInfo(
             firstSession->name, firstSession->avatarText, true);
     }
@@ -154,6 +157,28 @@ void MainWindow::setMessageStatus(const QString &message, bool isError)
     if (m_chatArea != nullptr)
     {
         m_chatArea->setMessageStatus(message, isError);
+    }
+}
+
+
+void MainWindow::setCurrentUsername(const QString &username)
+{
+    if (m_chatArea != nullptr)
+    {
+        m_chatArea->setCurrentUsername(username);
+    }
+}
+
+bool MainWindow::appendMessage(const ChatMessageRecord &message)
+{
+    return m_chatArea != nullptr && m_chatArea->appendMessage(message);
+}
+
+void MainWindow::clearMessages()
+{
+    if (m_chatArea != nullptr)
+    {
+        m_chatArea->clearMessages();
     }
 }
 
