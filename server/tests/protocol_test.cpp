@@ -81,6 +81,13 @@ namespace
         CHECK(static_cast<std::uint16_t>(protocolHeader::CommandType::QUERY_FRIEND_LIST_FAILED) == 37);
     }
 
+    void testConversationListCommandCodeValues()
+    {
+        CHECK(static_cast<std::uint16_t>(protocolHeader::CommandType::QUERY_CONVERSATION_LIST_REQUEST) == 38);
+        CHECK(static_cast<std::uint16_t>(protocolHeader::CommandType::QUERY_CONVERSATION_LIST_SUCCESS) == 39);
+        CHECK(static_cast<std::uint16_t>(protocolHeader::CommandType::QUERY_CONVERSATION_LIST_FAILED) == 40);
+    }
+
     void testEncoderDecoderRoundTrip()
     {
         FrameEncoder encoder;
@@ -411,6 +418,7 @@ int main()
     try
     {
         runTest("FriendCommandCodeValues", testFriendCommandCodeValues);
+        runTest("ConversationListCommandCodeValues", testConversationListCommandCodeValues);
         runTest("EncoderDecoderRoundTrip", testEncoderDecoderRoundTrip);
         runTest("NeedMoreData_PartialHeader", testNeedMoreDataForPartialHeader);
         runTest("NeedMoreData_PartialBody", testNeedMoreDataForPartialBody);
