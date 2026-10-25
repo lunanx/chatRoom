@@ -47,6 +47,8 @@ private slots:
     // 当前已登录用户在选中的真实会话中发送一条文本消息。
     void onMessageSendRequested(const QString &text, quint64 conversationId, bool isGroup);
     void onHistoryRequested(quint64 conversationId);
+    void onConversationSelected(quint64 conversationId);
+    void onNewSessionRequested();
 
 private:
     // 一个请求在真正发送前需要保存命令、编号和 JSON 内容。
@@ -64,6 +66,7 @@ private:
     bool sendRequest(const PendingRequest &request);
     void sendPendingRequests();
     void ensureServerConnection();
+    void requestConversationList(quint64 preferredConversationId = 0);
 
     // 清理本次尚未完成的网络请求状态，不会自行更改已登录用户。
     void clearPendingRequests();
@@ -99,6 +102,8 @@ private:
     quint64 m_nextRequestId = 1;
     QQueue<PendingRequest> m_pendingRequests;
     QHash<quint64, protocolHeader::CommandType> m_requestsAwaitingResponse;
+    // 保存会话列表刷新后需要优先打开的会话；普通刷新时值为 0。
+    QHash<quint64, quint64> m_conversationListPreferredIds;
 
     // 认证请求处理中时禁止再次提交，避免快速双击产生多个登录/注册请求。
     bool m_authRequestPending = false;

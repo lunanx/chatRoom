@@ -25,27 +25,7 @@
 SessionListModel::SessionListModel(QObject *parent)
     : QAbstractListModel(parent)
 {
-    // 初始示例数据用于检查界面布局；接入后端后可由 setSessions() 替换。
-    m_sessions = {
-        {QStringLiteral("session-lin"), QStringLiteral("林间风"), QStringLiteral("14:32"),
-         QStringLiteral("我把新版原型整理好了，发你看看"), QStringLiteral("林"),
-         Theme::PeachStart, Theme::PeachEnd, 0, false, false},
-        {QStringLiteral("group-design"), QStringLiteral("设计协作群"), QStringLiteral("14:18"),
-         QStringLiteral("小满：卡片间距可以再松一点"), QStringLiteral("设"),
-         Theme::MintStart, Theme::MintEnd, 3, true, true},
-        {QStringLiteral("session-xiaoman"), QStringLiteral("小满"), QStringLiteral("13:56"),
-         QStringLiteral("收到！稍后我来同步一下"), QStringLiteral("小"),
-         Theme::BlueStart, Theme::BlueEnd, 0, false, false},
-        {QStringLiteral("session-zhou"), QStringLiteral("周同学"), QStringLiteral("昨天"),
-         QStringLiteral("文件已经上传到项目目录了"), QStringLiteral("周"),
-         Theme::GoldStart, Theme::GoldEnd, 0, false, false},
-        {QStringLiteral("group-product"), QStringLiteral("产品讨论组"), QStringLiteral("昨天"),
-         QStringLiteral("你：我们周五之前确定交互"), QStringLiteral("产"),
-         Theme::DarkStart, Theme::DarkEnd, 0, true, false},
-        {QStringLiteral("group-project"), QStringLiteral("小组作业"), QStringLiteral("周一"),
-         QStringLiteral("文档我整理到共享文件夹了"), QStringLiteral("小"),
-         Theme::MintStart, Theme::MintEnd, 0, true, false}
-    };
+    // 登录前不显示演示会话；登录后由服务端会话列表响应填充模型。
 }
 
 int SessionListModel::rowCount(const QModelIndex &parent) const
@@ -444,11 +424,47 @@ void SessionListPanel::setActiveFilter(SessionFilterProxyModel::Filter filter)
         m_listView->setCurrentIndex(m_proxyModel->index(0, 0));
 }
 
-void SessionListPanel::setSessions(const QVector<SessionItem> &sessions)
+void SessionListPanel::setSessions(const QVector<SessionItem> &sessions,
+                                   quint64 preferredConversationId)
 {
     m_sourceModel->setSessions(sessions);
-    if (m_proxyModel->rowCount() > 0)
-        m_listView->setCurrentIndex(m_proxyModel->index(0, 0));
+    m_listView->clearSelection();
+    m_listView->setCurrentIndex(QModelIndex());
+
+    if (m_proxyModel->rowCount() == 0)
+    {
+        return;
+    }
+
+    // 默认显示所有会话，防止“群聊”筛选器把刚打开的私聊隐藏。
+    setActiveFilter(SessionFilterProxyModel::Filter::All);
+
+    QModelIndex selectedIndex;
+    if (preferredConversationId != 0)
+    {
+        for (int row = 0; row < m_sourceModel->rowCount(); ++row)
+        {
+            const SessionItem *item = m_sourceModel->sessionAt(row);
+            if (item != nullptr && item->conversationId == preferredConversationId)
+            {
+                selectedIndex = m_proxyModel->mapFromSource(m_sourceModel->index(row, 0));
+                break;
+            }
+        }
+    }
+
+    // 找不到指定 ID 时，退回列表第一条；空列表则保持未选中状态。
+    if (!selectedIndex.isValid())
+    {
+        selectedIndex = m_proxyModel->index(0, 0);
+    }
+
+    m_listView->setCurrentIndex(selectedIndex);
+    const QString sessionId = selectedIndex.data(SessionListModel::IdRole).toString();
+    if (!sessionId.isEmpty())
+    {
+        emit sessionActivated(sessionId);
+    }
 }
 
 SessionListModel *SessionListPanel::sessionModel() const

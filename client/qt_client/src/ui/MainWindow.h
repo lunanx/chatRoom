@@ -1,6 +1,7 @@
 #pragma once
 
 #include <QMainWindow>
+#include "SessionListPanel.h"
 #include <QPoint>
 #include <QRect>
 #include <Qt>
@@ -35,6 +36,9 @@ public:
     // 退出登录、断线或会话状态失效时清理消息内存。
     void clearMessages();
     void setHistoryLoading(quint64 conversationId, bool loading, bool hasMore = true);
+    // 服务端会话列表到达后刷新左侧列表，并可指定需要优先打开的会话 ID。
+    void setConversations(const QVector<SessionItem> &sessions, quint64 preferredConversationId = 0);
+    quint64 currentConversationId() const;
 
 signals:
     // 用户从侧边栏“更多”菜单中选择退出登录时发出。
@@ -43,6 +47,10 @@ signals:
     // 输入区请求发送文本；会话 ID 与类型来自当前选中的会话。
     void messageSendRequested(const QString &text, quint64 conversationId, bool isGroup);
     void historyRequested(quint64 conversationId);
+    // 切换到会话时通知控制器：仅首次进入该会话时自动拉取最新消息。
+    void conversationSelected(quint64 conversationId);
+    // 用户点击会话栏的“新建会话”按钮。
+    void newSessionRequested();
 
 protected:
     // 绘制铺满窗口的底色与紫色光晕。
@@ -76,6 +84,7 @@ private:
     QRect m_resizeStartGeometry;      // 缩放开始时的窗口几何区域。
 
     ChatArea *m_chatArea = nullptr;    // 当前聊天区，负责显示发送状态。
-    quint64 m_currentConversationId = 0; // 当前数据库会话 ID；演示数据使用 0。
+    SessionListPanel *m_sessionListPanel = nullptr; // 左侧真实会话列表。
+    quint64 m_currentConversationId = 0; // 当前数据库会话 ID；0 表示尚未选中会话。
     bool m_currentConversationIsGroup = false; // 当前会话是否为群聊。
 };

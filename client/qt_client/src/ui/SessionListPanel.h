@@ -14,7 +14,7 @@ class QListView;
 class QPushButton;
 
 // 一条会话在列表中展示所需的数据。
-// 先使用本地示例数据，后续接入服务器时可由网络响应更新这些字段。
+// 登录后由服务端会话列表响应填充这些字段。
 struct SessionItem
 {
     QString id;                 // 会话唯一标识
@@ -27,7 +27,7 @@ struct SessionItem
     int unreadCount = 0;        // 未读消息数；0 表示不显示未读气泡
     bool group = false;          // 是否为群聊
     bool unread = false;         // 是否属于“未读”筛选项
-    quint64 conversationId = 0;  // 数据库 Conversation.id；0 表示当前仍是演示会话，不能真实发送消息。
+    quint64 conversationId = 0;  // 数据库 Conversation.id；0 表示尚未选中有效会话。
 };
 
 // QListView 使用的数据模型：只负责保存会话数据并向视图提供角色数据。
@@ -115,8 +115,8 @@ class SessionListPanel : public QWidget
 public:
     explicit SessionListPanel(QWidget *parent = nullptr);
 
-    // 给界面提供更新会话数据的入口；模型会自动通知 QListView 重绘。
-    void setSessions(const QVector<SessionItem> &sessions);
+    // 用服务端返回的真实会话更新列表；preferredConversationId 用于新建/打开会话后定位目标。
+    void setSessions(const QVector<SessionItem> &sessions, quint64 preferredConversationId = 0);
     SessionListModel *sessionModel() const;
     QListView *sessionView() const;
 

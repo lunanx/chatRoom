@@ -38,7 +38,7 @@ public:
     // 控制器在 TCP 层接受发送请求后清空编辑框。
     void clearMessageInput();
 
-    // 切换当前会话时只显示该会话的消息；ID 为 0 的演示会话不显示网络消息。
+    // 切换当前会话时只显示该会话的消息；ID 为 0 时不显示网络消息。
     void setCurrentConversationId(quint64 conversationId);
     // 用登录成功的用户名区分自己发送的气泡和对方发送的气泡。
     void setCurrentUsername(const QString &username);

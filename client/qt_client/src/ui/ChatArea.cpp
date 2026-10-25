@@ -154,7 +154,7 @@ ChatArea::ChatArea(QWidget *parent)
         }
         else
         {
-            setMessageStatus(QStringLiteral("当前是演示会话，尚未绑定真实会话 ID"), true);
+            setMessageStatus(QStringLiteral("当前没有选中真实会话，请先从左侧列表选择会话。"), true);
         }
     });
 }
@@ -231,7 +231,7 @@ void ChatArea::setCurrentConversationId(quint64 conversationId)
     m_currentConversationId = conversationId;
     m_messageFilterModel->setConversationId(conversationId);
 
-    // 切换会话时恢复历史按钮状态；ID 为 0 的演示会话不可查询历史消息。
+    // 切换会话时恢复历史按钮状态；ID 为 0 时不可查询历史消息。
     if (m_inputBar != nullptr)
     {
         m_inputBar->setHistoryLoading(false, true, conversationId != 0);
