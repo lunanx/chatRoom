@@ -333,7 +333,7 @@ QueryHistoricalMessageResult MessageRepository::queryHistoricalMessage(const std
     {
         queryResult = dbManager.query(
             "SELECT m.seq, m.content, m.sender_id,u.username "
-            "FROM MESSAGE m "
+            "FROM Message m "
             "INNER JOIN User u ON u.id = m.sender_id "
             "WHERE conversation_id = ? "
             "  AND status = 1 "
