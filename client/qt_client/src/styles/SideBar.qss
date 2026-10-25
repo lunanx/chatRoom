@@ -1,0 +1,159 @@
+/*
+ * Go聊主题 B：左侧主导航栏。
+ * 对应 qt_chat_ui_theme_b_custom.html 中的 .nav-rail、.brand-logo、.nav-icon、.nav-user。
+ */
+
+/* 必须给 QWidget 设置 WA_StyledBackground，才能确保这个渐变背景绘制出来。 */
+QWidget#sideBar {
+    background: qlineargradient(
+        x1: 0, y1: 0, x2: 0, y2: 1,
+        stop: 0 #F3F0FC,
+        stop: 1 #EAE5F8
+    );
+    border-right: 1px solid rgba(88, 70, 130, 26);
+}
+
+QWidget#brandLogo,
+QWidget#navMain,
+QWidget#navBottom {
+    background: transparent;
+    border: none;
+}
+
+/* 顶部 G 图标：27×27，圆角和品牌渐变遵循 HTML 设计稿。 */
+QLabel#brandMark {
+    color: #FFFFFF;
+    background: qlineargradient(
+        x1: 0, y1: 0, x2: 1, y2: 1,
+        stop: 0 #806BFF,
+        stop: 0.52 #6A53F6,
+        stop: 1 #927BFF
+    );
+    border: none;
+    border-radius: 10px;
+    font-size: 15px;
+    font-weight: 900;
+}
+
+QLabel#brandWord {
+    color: #302A48;
+    background: transparent;
+    font-size: 11px;
+    font-weight: 850;
+}
+
+/* 主导航和底部操作按钮的默认状态。 */
+QToolButton {
+    color: #77708F;
+    background: transparent;
+    border: none;
+    border-radius: 12px;
+    padding: 0;
+    font-size: 18px;
+}
+
+QToolButton:hover {
+    color: #6A53F6;
+    background: rgba(106, 83, 246, 19);
+}
+
+/* active：白色底、紫色图标和柔和阴影；与 HTML 的 .nav-icon.active 一致。 */
+QToolButton:checked {
+    color: #6A53F6;
+    background: #FFFFFF;
+    border-left: 3px solid #6A53F6;
+    border-radius: 12px;
+}
+
+QToolButton:pressed {
+    background: #ECE6FF;
+}
+
+QToolButton:focus {
+    outline: none;
+}
+
+/* 底部设置、更多图标稍微保持与主导航一致的视觉尺寸。 */
+QToolButton#settingsButton,
+QToolButton#moreButton {
+    font-size: 18px;
+}
+
+/* 用户头像占位：30px 圆形，使用设计稿中的深紫色。 */
+QLabel#navUserAvatar {
+    color: #FFFFFF;
+    background: #5550A6;
+    border: 2px solid rgba(255, 255, 255, 230);
+    border-radius: 15px;
+    font-size: 10px;
+    font-weight: 800;
+}
+
+
+/* “更多”弹出菜单：外层使用独立底板，不让平台默认的菜单项背景透出来。 */
+QMenu#moreMenu {
+    background-color: #FBFAFF;
+    border: none;
+    border-radius: 10px;
+    padding: 4px;
+}
+
+/* QWidgetAction 默认会被 QMenu 当成菜单项布局；禁用其默认选中/悬停底色，
+   避免在圆角按钮后面出现直角矩形。 */
+QMenu#moreMenu::item {
+    background: transparent;
+    border: none;
+    padding: 0px;
+    margin: 0px;
+}
+
+QMenu#moreMenu::item:selected,
+QMenu#moreMenu::item:hover,
+QMenu#moreMenu::item:pressed {
+    background: transparent;
+    border: none;
+}
+
+/* 自定义退出登录菜单项的容器只负责布局，不绘制底色或边框。 */
+QWidget#logoutMenuContainer {
+    background-color: #F7F4FF;
+    border: none;
+    border-radius: 8px;
+    padding: 0px;
+    margin: 0px;
+}
+
+/* 默认、悬停和按下共用相同尺寸、相同 8px 圆角；只改变背景色和文字颜色。 */
+QPushButton#logoutMenuButton {
+    color: #57516F;
+    background-color: #F7F4FF;
+    border: none;
+    border-radius: 8px;
+    padding: 0px;
+    margin: 0px;
+    min-width: 108px;
+    max-width: 108px;
+    min-height: 34px;
+    max-height: 34px;
+    font-size: 12px;
+    font-weight: 500;
+}
+
+QPushButton#logoutMenuButton:hover {
+    color: #6650F5;
+    background-color: #E9E3FF;
+    border: none;
+    border-radius: 8px;
+}
+
+QPushButton#logoutMenuButton:pressed {
+    color: #5A43E8;
+    background-color: #DCD2FF;
+    border: none;
+    border-radius: 8px;
+}
+
+QPushButton#logoutMenuButton:focus {
+    border: none;
+    outline: none;
+}

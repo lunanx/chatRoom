@@ -1,0 +1,160 @@
+# 指定 CMake 的最低版本
+cmake_minimum_required(VERSION 3.21)
+
+# 定义项目名称，并启用 C++
+project(ChatRoomClient LANGUAGES CXX)
+
+# 使用 C++17 标准
+set(CMAKE_CXX_STANDARD 17)
+set(CMAKE_CXX_STANDARD_REQUIRED ON)
+set(CMAKE_CXX_EXTENSIONS OFF)
+
+# 启用 Qt 的自动代码处理功能
+set(CMAKE_AUTOMOC ON)
+set(CMAKE_AUTOUIC ON)
+set(CMAKE_AUTORCC ON)
+
+# 查找 Qt 6 的 各种模块
+find_package(Qt6 6.5 REQUIRED COMPONENTS 
+    Widgets 
+    Network)
+
+# 创建客户端可执行程序
+add_executable(ChatRoomClient
+    src/main.cpp
+    # UI界面
+    src/Theme.h
+
+    # 协议编解码
+    src/network/ProtocolCodec.h
+    src/network/ProtocolCodec.cpp
+
+    # TCP 通信
+    src/network/TcpClient.h
+    src/network/TcpClient.cpp
+
+    # 应用控制器：统一管理窗口切换和登录/注册网络请求
+    src/controller/AppController.h
+    src/controller/AppController.cpp
+
+    # 主窗口
+    src/ui/MainWindow.h
+    src/ui/MainWindow.cpp
+
+    # 聊天消息数据模型（按会话保存并去重）
+    src/model/ChatMessageRecord.h
+    src/ui/MessageListModel.h
+    src/ui/MessageListModel.cpp
+    src/ui/MessageFilterProxyModel.h
+    src/ui/MessageFilterProxyModel.cpp
+    src/ui/MessageItemDelegate.h
+    src/ui/MessageItemDelegate.cpp
+
+    # 现代化紫灰主题提示框，替代原生 QMessageBox
+    src/ui/ModernMessageBox.h
+    src/ui/ModernMessageBox.cpp
+
+    # 左侧导航栏及其 QSS 资源
+    src/ui/SideBar.h
+    src/ui/SideBar.cpp
+    src/ui/SideBar.qrc
+
+    # 中间会话列表
+    src/ui/SessionListPanel.h
+    src/ui/SessionListPanel.cpp
+    src/ui/SessionListPanel.qrc
+
+    # 右侧聊天区域、输入区以及对应的 QSS 资源
+    src/ui/ChatArea.h
+    src/ui/ChatArea.cpp
+    src/ui/InputBar.h
+    src/ui/InputBar.cpp
+    src/ui/ChatArea.qrc
+    src/ui/MessageBubble.h
+    src/ui/MessageBubble.cpp
+    
+    # 欢迎和登录/注册界面及其 QSS 资源
+    src/ui/WelcomePage.h
+    src/ui/WelcomePage.cpp
+    src/ui/AuthPage.h
+    src/ui/AuthPage.cpp
+    resources/pages.qrc
+    src/ui/LoginWindow.h
+    src/ui/LoginWindow.cpp
+    src/ui/WindowTopControls.h
+)
+
+# 将客户端独立配置复制到可执行文件旁，支持单配置和多配置生成器。
+add_custom_command(TARGET ChatRoomClient POST_BUILD
+    COMMAND ${CMAKE_COMMAND} -E copy_if_different
+        "${CMAKE_CURRENT_SOURCE_DIR}/config/client.conf"
+        "$<TARGET_FILE_DIR:ChatRoomClient>/client.conf"
+    COMMENT "Copying client.conf beside ChatRoomClient"
+)
+
+# 引用项目公共协议定义和已有的第三方头文件
+target_include_directories(ChatRoomClient
+    PRIVATE
+        "${CMAKE_CURRENT_SOURCE_DIR}/src"
+        "${CMAKE_CURRENT_SOURCE_DIR}/../../common"
+        "${CMAKE_CURRENT_SOURCE_DIR}/../../resources"
+)
+
+# 链接 Qt Widgets 库
+target_link_libraries(ChatRoomClient
+    PRIVATE 
+        Qt6::Widgets
+        Qt6::Network
+)
+
+# 启用 CTest 测试框架
+enable_testing()
+
+# 创建独立的协议编码测试程序
+add_executable(ProtocolCodecTest
+    tests/ProtocolCodecTest.cpp
+    src/network/ProtocolCodec.cpp
+    src/network/ProtocolCodec.h
+)
+
+# 测试程序同样需要引用公共协议头文件
+target_include_directories(ProtocolCodecTest
+    PRIVATE
+        "${CMAKE_CURRENT_SOURCE_DIR}/../../common"
+        "${CMAKE_CURRENT_SOURCE_DIR}/../../resources"
+        "${CMAKE_CURRENT_SOURCE_DIR}/src"
+)
+
+# 协议编解码使用 Qt Core 中的基础类型
+target_link_libraries(ProtocolCodecTest
+    PRIVATE Qt6::Core
+)
+
+# 将测试注册到 CTest
+add_test(
+    NAME ProtocolCodecEncodeTest
+    COMMAND ProtocolCodecTest
+)
+
+# 消息模型测试：验证消息排序、去重、会话隔离和账号状态清理。
+add_executable(MessageModelTest
+    tests/MessageModelTest.cpp
+    src/model/ChatMessageRecord.h
+    src/ui/MessageListModel.h
+    src/ui/MessageListModel.cpp
+    src/ui/MessageFilterProxyModel.h
+    src/ui/MessageFilterProxyModel.cpp
+)
+
+target_include_directories(MessageModelTest
+    PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/src"
+)
+
+target_link_libraries(MessageModelTest
+    PRIVATE Qt6::Core
+)
+
+add_test(
+    NAME MessageModelTest
+    COMMAND MessageModelTest
+)

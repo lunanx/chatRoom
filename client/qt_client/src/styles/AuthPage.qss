@@ -1,0 +1,174 @@
+/* 登录 / 注册页面。品牌区渐变和圆环由 AuthBrandPanel 的 QPainter 绘制。 */
+QWidget#authPage {
+    background-color: transparent;
+    color: #302A48;
+}
+
+QWidget#authCard {
+    background-color: #FCFBFF;
+    border: none;
+    border-radius: 0;
+}
+
+QLabel#authMiniMark {
+    color: #FFFFFF;
+    background: qlineargradient(x1:0, y1:0, x2:1, y2:1,
+                                stop:0 #806BFF, stop:0.52 #6A53F6, stop:1 #927BFF);
+    border-radius: 12px;
+    font-size: 19px;
+    font-weight: 900;
+}
+
+QLabel#authMiniName {
+    color: #302A48;
+    font-size: 16px;
+    font-weight: 880;
+}
+
+QLabel#authBrandTitle {
+    color: #302A48;
+    font-size: 48px;
+    font-weight: 900;
+    line-height: 1.06;
+}
+
+QLabel#authBrandSlogan {
+    color: #6A53F6;
+    font-size: 23px;
+    font-weight: 850;
+    letter-spacing: 2px;
+}
+
+QLabel#authBrandDescription {
+    color: #77708F;
+    font-size: 13px;
+}
+
+QLabel#authBrandDot {
+    color: #6A53F6;
+    font-size: 9px;
+}
+
+QLabel#authBrandFooter {
+    color: #77708F;
+    font-size: 10px;
+}
+
+QWidget#authFormPanel {
+    background-color: #FCFBFF;
+}
+
+QLabel#authFormEyebrow {
+    color: #6A53F6;
+    font-size: 10px;
+    font-weight: 850;
+    letter-spacing: 2px;
+}
+
+QLabel#authFormTitle {
+    color: #302A48;
+    font-size: 31px;
+    font-weight: 850;
+}
+
+QLabel#authFormSubtitle {
+    color: #A39BB9;
+    font-size: 12px;
+}
+
+QLabel#authFieldLabel {
+    color: #77708F;
+    font-size: 11px;
+    font-weight: 750;
+}
+
+QLineEdit#authAccountEdit,
+QLineEdit#authPasswordEdit {
+    min-height: 46px;
+    padding: 0 16px;
+    color: #302A48;
+    background-color: #FFFFFF;
+    border: 1px solid rgba(109, 88, 172, 31);
+    border-radius: 15px;
+    selection-background-color: #6A53F6;
+    font-size: 12px;
+}
+
+QLineEdit#authAccountEdit:hover,
+QLineEdit#authPasswordEdit:hover {
+    border-color: rgba(106, 83, 246, 90);
+}
+
+QLineEdit#authAccountEdit:focus,
+QLineEdit#authPasswordEdit:focus {
+    border: 1px solid rgba(106, 83, 246, 148);
+    background-color: #FFFFFF;
+}
+
+QLineEdit#authAccountEdit:disabled,
+QLineEdit#authPasswordEdit:disabled {
+    color: #A39BB9;
+    background-color: #F5F2FB;
+}
+
+QCheckBox#authRememberCheckBox {
+    spacing: 7px;
+    color: #77708F;
+    font-size: 10px;
+}
+
+QCheckBox#authRememberCheckBox::indicator {
+    width: 14px;
+    height: 14px;
+    border: 1px solid rgba(106, 83, 246, 71);
+    border-radius: 5px;
+    background-color: #FFFFFF;
+}
+
+QCheckBox#authRememberCheckBox::indicator:checked {
+    border-color: #6A53F6;
+    background-color: #6A53F6;
+}
+
+QPushButton#authLoginButton {
+    min-height: 47px;
+    color: #FFFFFF;
+    border: none;
+    border-radius: 15px;
+    background: qlineargradient(x1:0, y1:0, x2:1, y2:1,
+                                stop:0 #806BFF, stop:0.52 #6A53F6, stop:1 #927BFF);
+    font-size: 12px;
+    font-weight: 800;
+}
+
+QPushButton#authLoginButton:hover {
+    background: qlineargradient(x1:0, y1:0, x2:1, y2:1,
+                                stop:0 #8D7BFF, stop:0.52 #745FF8, stop:1 #A08CFF);
+}
+
+QPushButton#authLoginButton:pressed {
+    background: #5941E7;
+}
+
+QPushButton#authRegisterButton {
+    min-height: 47px;
+    color: #6A53F6;
+    border: 1px solid rgba(106, 83, 246, 51);
+    border-radius: 15px;
+    background-color: #ECE6FF;
+    font-size: 12px;
+    font-weight: 800;
+}
+
+QPushButton#authRegisterButton:hover {
+    background-color: rgba(106, 83, 246, 36);
+}
+
+QPushButton#authRegisterButton:pressed {
+    background-color: #DDD4FF;
+}
+
+QLabel#authFormLegal {
+    color: #A39BB9;
+    font-size: 9px;
+}

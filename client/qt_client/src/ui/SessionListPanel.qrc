@@ -1,0 +1,5 @@
+<RCC>
+    <qresource prefix="/styles">
+        <file alias="SessionListPanel.qss">../styles/SessionListPanel.qss</file>
+    </qresource>
+</RCC>

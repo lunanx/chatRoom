@@ -1,0 +1,6 @@
+<RCC>
+    <qresource prefix="/styles">
+        <file alias="WelcomePage.qss">../src/styles/WelcomePage.qss</file>
+        <file alias="AuthPage.qss">../src/styles/AuthPage.qss</file>
+    </qresource>
+</RCC>

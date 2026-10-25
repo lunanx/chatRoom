@@ -1,0 +1,92 @@
+/* InputBar：工具栏、无边框文本编辑区和品牌渐变发送按钮。 */
+QWidget#inputBar {
+    background-color: rgba(255, 255, 255, 0.82);
+    border-top: 1px solid rgba(109, 88, 172, 0.12);
+}
+
+QWidget#inputToolbar {
+    background: transparent;
+}
+
+QToolButton#emojiToolButton,
+QToolButton#imageToolButton,
+QToolButton#fileToolButton,
+QToolButton#screenshotToolButton {
+    color: #77708F;
+    background: transparent;
+    border: none;
+    border-radius: 9px;
+    font-size: 17px;
+}
+QToolButton#emojiToolButton:hover,
+QToolButton#imageToolButton:hover,
+QToolButton#fileToolButton:hover,
+QToolButton#screenshotToolButton:hover {
+    color: #6A53F6;
+    background-color: rgba(106, 83, 246, 0.09);
+}
+
+QTextEdit#messageEditor {
+    color: #302A48;
+    background: transparent;
+    border: none;
+    padding: 3px 1px;
+    selection-background-color: #ECE6FF;
+    selection-color: #302A48;
+    font-size: 12px;
+}
+QTextEdit#messageEditor:focus {
+    border: none;
+    outline: none;
+}
+
+QPushButton#sendButton {
+    color: #FFFFFF;
+    background: qlineargradient(x1:0, y1:0, x2:1, y2:1,
+                                stop:0 #806BFF, stop:0.52 #6A53F6, stop:1 #927BFF);
+    border: none;
+    border-radius: 13px;
+    padding: 0 15px;
+    font-size: 11px;
+    font-weight: 75;
+}
+QPushButton#sendButton:hover {
+    background: qlineargradient(x1:0, y1:0, x2:1, y2:1,
+                                stop:0 #927FFF, stop:0.52 #5941E7, stop:1 #806BFF);
+}
+QPushButton#sendButton:pressed {
+    background: #5941E7;
+    padding-top: 1px;
+}
+QPushButton#sendButton:disabled {
+    color: rgba(255, 255, 255, 0.75);
+    background: #B8ADEE;
+}
+
+/* 历史消息按钮位于快捷提示原先所在的位置，采用低对比度的轻按钮样式。 */
+QPushButton#loadHistoryButton {
+    color: #8C83A5;
+    background-color: rgba(106, 83, 246, 0.055);
+    border: 1px solid rgba(106, 83, 246, 0.09);
+    border-radius: 8px;
+    padding: 0 10px;
+    font-size: 10px;
+}
+QPushButton#loadHistoryButton:hover {
+    color: #6A53C7;
+    background-color: rgba(106, 83, 246, 0.10);
+}
+QPushButton#loadHistoryButton:disabled {
+    color: #B8B1C7;
+    background-color: rgba(120, 111, 145, 0.035);
+    border-color: rgba(120, 111, 145, 0.05);
+}
+
+QLabel#inputStatusLabel {
+    color: #77708F;
+    font-size: 10px;
+    padding: 0 2px;
+}
+QLabel#inputStatusLabel[error="true"] {
+    color: #B66A80;
+}

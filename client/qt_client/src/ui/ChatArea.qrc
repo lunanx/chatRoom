@@ -1,0 +1,6 @@
+<RCC>
+    <qresource prefix="/styles">
+        <file alias="ChatArea.qss">../styles/ChatArea.qss</file>
+        <file alias="InputBar.qss">../styles/InputBar.qss</file>
+    </qresource>
+</RCC>
