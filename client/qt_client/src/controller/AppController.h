@@ -4,6 +4,7 @@
 #include <QByteArray>
 #include <QHash>
 #include <QJsonObject>
+#include <QJsonArray>
 #include <QQueue>
 #include <QSet>
 #include <QString>
@@ -47,7 +48,6 @@ private slots:
     // 当前已登录用户在选中的真实会话中发送一条文本消息。
     void onMessageSendRequested(const QString &text, quint64 conversationId, bool isGroup);
     void onHistoryRequested(quint64 conversationId);
-    void onConversationSelected(quint64 conversationId);
     void onNewSessionRequested();
 
 private:
@@ -66,7 +66,6 @@ private:
     bool sendRequest(const PendingRequest &request);
     void sendPendingRequests();
     void ensureServerConnection();
-    void requestConversationList(quint64 preferredConversationId = 0);
 
     // 清理本次尚未完成的网络请求状态，不会自行更改已登录用户。
     void clearPendingRequests();
@@ -82,6 +81,19 @@ private:
 
     void stopMessageRequestTimer(quint64 requestId);
     void clearMessageRequestTimers();
+
+    // 非消息业务请求（会话列表、好友列表、创建会话）单独计时，避免无响应时一直等待。
+    quint64 sendOperationRequest(protocolHeader::CommandType command, const QJsonObject &body);
+    void stopOperationRequestTimer(quint64 requestId);
+    void clearOperationRequestTimers();
+    void requestConversationList();
+    void handleConversationListResponse(protocolHeader::CommandType responseCommand,
+                                       const QByteArray &jsonBody);
+    void handleFriendListResponse(protocolHeader::CommandType responseCommand,
+                                  const QByteArray &jsonBody);
+    void handleCreateConversationResponse(protocolHeader::CommandType responseCommand,
+                                         const QByteArray &jsonBody);
+    void promptFriendSelection(const QJsonArray &friends);
     void handleHistoryResponse(quint64 requestId, protocolHeader::CommandType responseCommand, const QByteArray &jsonBody);
 
     // 统一显示紫灰主题提示框。
@@ -102,8 +114,6 @@ private:
     quint64 m_nextRequestId = 1;
     QQueue<PendingRequest> m_pendingRequests;
     QHash<quint64, protocolHeader::CommandType> m_requestsAwaitingResponse;
-    // 保存会话列表刷新后需要优先打开的会话；普通刷新时值为 0。
-    QHash<quint64, quint64> m_conversationListPreferredIds;
 
     // 认证请求处理中时禁止再次提交，避免快速双击产生多个登录/注册请求。
     bool m_authRequestPending = false;
@@ -123,6 +133,14 @@ private:
 
     // 消息可以连续发送，单独为每条消息计时，避免一个响应重置其他消息的超时。
     QHash<quint64, QTimer *> m_messageRequestTimers;
+
+    // 为会话列表/好友列表/创建会话这类普通请求单独保存超时计时器。
+    QHash<quint64, QTimer *> m_operationRequestTimers;
+    quint64 m_conversationListRequestId = 0;
+    quint64 m_friendListRequestId = 0;
+    quint64 m_createConversationRequestId = 0;
+    quint64 m_pendingConversationSelectionId = 0;
+    bool m_conversationListRefreshPending = false;
 
     // 历史消息请求单独记录会话 ID；服务端分页游标是该会话当前已加载的最早 seq。
     QHash<quint64, quint64> m_historyRequests;

@@ -24,10 +24,11 @@ class ChatArea : public QWidget
 public:
     explicit ChatArea(QWidget *parent = nullptr);
 
-    // 更新当前会话的标题、头像文字和在线状态。
+    // 更新当前会话标题、头像文字和状态文案（例如“私聊”“群聊”）。
+    // 当前服务端还未提供在线状态，因此这里不虚构对方在线/离线。
     void setConversationInfo(const QString &name,
                              const QString &avatarText,
-                             bool online);
+                             const QString &statusText);
 
     // 提供消息列表和输入区访问接口，方便后续接入模型与控制器。
     QListView *messageListView() const;
@@ -38,7 +39,7 @@ public:
     // 控制器在 TCP 层接受发送请求后清空编辑框。
     void clearMessageInput();
 
-    // 切换当前会话时只显示该会话的消息；ID 为 0 时不显示网络消息。
+    // 切换当前会话时只显示该会话的消息；ID 为 0 表示当前没有选中真实会话。
     void setCurrentConversationId(quint64 conversationId);
     // 用登录成功的用户名区分自己发送的气泡和对方发送的气泡。
     void setCurrentUsername(const QString &username);

@@ -4,19 +4,24 @@
 #include "ui/LoginWindow.h"
 #include "ui/MainWindow.h"
 #include "ui/ModernMessageBox.h"
-#include "ui/SessionListPanel.h"
-#include "Theme.h"
 #include "protocol/ProtocolBody.h"
 #include "model/ChatMessageRecord.h"
 
 #include <QCoreApplication>
+#include <QComboBox>
 #include <QDate>
+#include <QDialog>
+#include <QHBoxLayout>
+#include <QLabel>
+#include <QPushButton>
+#include <QVBoxLayout>
+#include <QVariant>
+#include "Theme.h"
+#include "ui/SessionListPanel.h"
 #include <QDateTime>
 #include <QDebug>
-#include <QDialog>
-#include <QJsonArray>
 #include <QJsonDocument>
-#include <QInputDialog>
+#include <QJsonArray>
 #include <QJsonObject>
 #include <QJsonValue>
 #include <QSettings>
@@ -45,6 +50,25 @@ namespace
 
         result = static_cast<quint64>(number);
         return result > 0;
+    }
+
+    QString displayConversationTime(const QString &serverTime)
+    {
+        const QDateTime time = QDateTime::fromString(
+            serverTime, QStringLiteral("yyyy-MM-dd HH:mm:ss"));
+        if (!time.isValid())
+        {
+            return serverTime;
+        }
+        if (time.date() == QDate::currentDate())
+        {
+            return time.toString(QStringLiteral("HH:mm"));
+        }
+        if (time.date().year() == QDate::currentDate().year())
+        {
+            return time.toString(QStringLiteral("MM/dd"));
+        }
+        return time.toString(QStringLiteral("yy/MM/dd"));
     }
 }
 
@@ -411,8 +435,51 @@ void AppController::onPacketReceived(quint16 command,
 
     const protocolHeader::CommandType originalCommand = requestIt.value();
     m_requestsAwaitingResponse.erase(requestIt);
+    stopOperationRequestTimer(requestId);
 
     const auto responseCommand = static_cast<protocolHeader::CommandType>(command);
+
+    if (originalCommand == protocolHeader::CommandType::QUERY_CONVERSATION_LIST_REQUEST)
+    {
+        if (m_conversationListRequestId == requestId)
+        {
+            m_conversationListRequestId = 0;
+        }
+        // 先取出合并刷新标记；新响应处理失败时也不能让旧的目标会话 ID 永久残留。
+        const bool refreshAgain = m_conversationListRefreshPending;
+        m_conversationListRefreshPending = false;
+        handleConversationListResponse(responseCommand, jsonBody);
+        if (refreshAgain)
+        {
+            QTimer::singleShot(250, this, [this]() { requestConversationList(); });
+        }
+        else
+        {
+            // 若成功打开的会话未出现在最终列表中，清除待选 ID，防止后续刷新误选旧目标。
+            m_pendingConversationSelectionId = 0;
+        }
+        return;
+    }
+
+    if (originalCommand == protocolHeader::CommandType::QUERY_FRIEND_LIST_REQUEST)
+    {
+        if (m_friendListRequestId == requestId)
+        {
+            m_friendListRequestId = 0;
+        }
+        handleFriendListResponse(responseCommand, jsonBody);
+        return;
+    }
+
+    if (originalCommand == protocolHeader::CommandType::CHATCREATE_REQUEST)
+    {
+        if (m_createConversationRequestId == requestId)
+        {
+            m_createConversationRequestId = 0;
+        }
+        handleCreateConversationResponse(responseCommand, jsonBody);
+        return;
+    }
 
     const bool isMessageSendRequest =
         originalCommand == protocolHeader::CommandType::GROUP_MESSAGE_SEND ||
@@ -455,312 +522,14 @@ void AppController::onPacketReceived(quint16 command,
             if (responseCommand == protocolHeader::CommandType::MESSAGE_SEND_SUCCESS)
             {
                 m_mainWindow->setMessageStatus(QStringLiteral("消息已保存到服务器"), false);
-                requestConversationList(m_mainWindow->currentConversationId());
+                // 服务端已持久化最新消息，刷新列表摘要和最近活动时间。
+                requestConversationList();
             }
             else
             {
                 m_mainWindow->setMessageStatus(resultMessage, true);
             }
         }
-        return;
-    }
-
-    // 会话列表请求独立处理，不混入登录/注册/退出登录状态机。
-    if (originalCommand == protocolHeader::CommandType::QUERY_CONVERSATION_LIST_REQUEST)
-    {
-        const quint64 preferredConversationId = m_conversationListPreferredIds.take(requestId);
-        if (responseCommand != protocolHeader::CommandType::QUERY_CONVERSATION_LIST_SUCCESS)
-        {
-            QJsonParseError error;
-            const QJsonDocument responseDoc = QJsonDocument::fromJson(jsonBody, &error);
-            const QString message = error.error == QJsonParseError::NoError && responseDoc.isObject()
-                ? responseDoc.object().value(QString::fromLatin1(protocolBody::MESSAGE))
-                      .toString(QStringLiteral("查询会话列表失败"))
-                : QStringLiteral("服务器返回了无法识别的会话列表响应");
-            if (m_mainWindow != nullptr)
-            {
-                m_mainWindow->setMessageStatus(message, true);
-            }
-            return;
-        }
-
-        QJsonParseError error;
-        const QJsonDocument responseDoc = QJsonDocument::fromJson(jsonBody, &error);
-        if (error.error != QJsonParseError::NoError || !responseDoc.isObject())
-        {
-            if (m_mainWindow != nullptr)
-            {
-                m_mainWindow->setMessageStatus(QStringLiteral("无法解析服务器的会话列表"), true);
-            }
-            return;
-        }
-
-        const QJsonObject response = responseDoc.object();
-        const QJsonValue dataValue = response.value(QString::fromLatin1(protocolBody::DATA));
-        if (!dataValue.isArray())
-        {
-            if (m_mainWindow != nullptr)
-            {
-                m_mainWindow->setMessageStatus(QStringLiteral("会话列表响应缺少 data 数组"), true);
-            }
-            return;
-        }
-
-        QVector<SessionItem> sessions;
-        const QJsonArray items = dataValue.toArray();
-        for (const QJsonValue &itemValue : items)
-        {
-            if (!itemValue.isObject())
-            {
-                continue;
-            }
-
-            const QJsonObject item = itemValue.toObject();
-            quint64 conversationId = 0;
-            if (!readPositiveJsonInteger(item, protocolBody::CONVERSATION_ID, conversationId))
-            {
-                qWarning() << "跳过缺少有效 conversation_id 的会话列表项";
-                continue;
-            }
-
-            const int type = item.value(QString::fromLatin1(protocolBody::TYPE)).toInt(0);
-            if (type != 1 && type != 2)
-            {
-                qWarning() << "跳过无法识别的会话类型:" << type;
-                continue;
-            }
-
-            QString displayName = item.value(QString::fromLatin1(protocolBody::DISPLAY_NAME)).toString().trimmed();
-            if (displayName.isEmpty())
-            {
-                displayName = item.value(QString::fromLatin1(protocolBody::USERNAME)).toString().trimmed();
-            }
-            if (displayName.isEmpty())
-            {
-                displayName = type == 2 ? QStringLiteral("未命名群聊") : QStringLiteral("未知联系人");
-            }
-
-            SessionItem session;
-            session.id = QString::number(conversationId);
-            session.conversationId = conversationId;
-            session.name = displayName;
-            session.avatarText = displayName.left(1);
-            session.group = (type == 2);
-            session.unreadCount = 0; // ReadCursor 尚未纳入本阶段，不伪造未读数字。
-            session.unread = false;
-
-            const QString lastMessage = item.value(QString::fromLatin1(protocolBody::LAST_MESSAGE)).toString();
-            session.preview = lastMessage.trimmed().isEmpty()
-                ? QStringLiteral("还没有消息") : lastMessage;
-
-            const QString rawTime = item.value(QString::fromLatin1(protocolBody::LAST_TIME)).toString();
-            const QDateTime dateTime = QDateTime::fromString(rawTime, QStringLiteral("yyyy-MM-dd HH:mm:ss"));
-            if (dateTime.isValid())
-            {
-                if (dateTime.date() == QDate::currentDate())
-                {
-                    session.time = dateTime.toString(QStringLiteral("HH:mm"));
-                }
-                else if (dateTime.date().year() == QDate::currentDate().year())
-                {
-                    session.time = dateTime.toString(QStringLiteral("MM-dd"));
-                }
-                else
-                {
-                    session.time = dateTime.toString(QStringLiteral("yyyy-MM-dd"));
-                }
-            }
-            else
-            {
-                session.time = rawTime;
-            }
-
-            // 头像暂时由首字和主题色绘制；服务端头像 URL 已保留在协议中，后续再接图片缓存。
-            if (session.group)
-            {
-                session.avatarStart = Theme::DarkStart;
-                session.avatarEnd = Theme::DarkEnd;
-            }
-            else
-            {
-                const int colorIndex = sessions.size() % 4;
-                switch (colorIndex)
-                {
-                case 0: session.avatarStart = Theme::PeachStart; session.avatarEnd = Theme::PeachEnd; break;
-                case 1: session.avatarStart = Theme::MintStart; session.avatarEnd = Theme::MintEnd; break;
-                case 2: session.avatarStart = Theme::BlueStart; session.avatarEnd = Theme::BlueEnd; break;
-                default: session.avatarStart = Theme::GoldStart; session.avatarEnd = Theme::GoldEnd; break;
-                }
-            }
-            sessions.push_back(session);
-        }
-
-        if (m_mainWindow != nullptr)
-        {
-            m_mainWindow->setConversations(sessions, preferredConversationId);
-            if (sessions.isEmpty())
-            {
-                m_mainWindow->setMessageStatus(
-                    QStringLiteral("还没有会话，点击列表上方的“新建会话”可与好友开始聊天。"), false);
-            }
-            else
-            {
-                m_mainWindow->setMessageStatus(
-                    QStringLiteral("已同步 %1 个真实会话").arg(sessions.size()), false);
-            }
-        }
-        return;
-    }
-
-    // 点击“新建会话”后先查询好友；用户选择好友后才请求服务端创建/获取私聊。
-    if (originalCommand == protocolHeader::CommandType::QUERY_FRIEND_LIST_REQUEST)
-    {
-        if (responseCommand != protocolHeader::CommandType::QUERY_FRIEND_LIST_SUCCESS)
-        {
-            QJsonParseError error;
-            const QJsonDocument responseDoc = QJsonDocument::fromJson(jsonBody, &error);
-            const QString message = error.error == QJsonParseError::NoError && responseDoc.isObject()
-                ? responseDoc.object().value(QString::fromLatin1(protocolBody::MESSAGE))
-                      .toString(QStringLiteral("查询好友列表失败"))
-                : QStringLiteral("服务器返回了无法识别的好友列表响应");
-            if (m_mainWindow != nullptr)
-            {
-                m_mainWindow->setMessageStatus(message, true);
-            }
-            return;
-        }
-
-        QJsonParseError error;
-        const QJsonDocument responseDoc = QJsonDocument::fromJson(jsonBody, &error);
-        if (error.error != QJsonParseError::NoError || !responseDoc.isObject())
-        {
-            if (m_mainWindow != nullptr)
-            {
-                m_mainWindow->setMessageStatus(QStringLiteral("无法解析服务器的好友列表"), true);
-            }
-            return;
-        }
-
-        const QJsonValue dataValue = responseDoc.object().value(QString::fromLatin1(protocolBody::DATA));
-        if (!dataValue.isArray())
-        {
-            if (m_mainWindow != nullptr)
-            {
-                m_mainWindow->setMessageStatus(QStringLiteral("好友列表响应缺少 data 数组"), true);
-            }
-            return;
-        }
-
-        QStringList friendLabels;
-        QHash<QString, quint64> friendIdsByLabel;
-        for (const QJsonValue &itemValue : dataValue.toArray())
-        {
-            if (!itemValue.isObject())
-            {
-                continue;
-            }
-            const QJsonObject item = itemValue.toObject();
-            quint64 friendId = 0;
-            if (!readPositiveJsonInteger(item, protocolBody::USER_ID, friendId))
-            {
-                continue;
-            }
-            const QString username = item.value(QString::fromLatin1(protocolBody::USERNAME)).toString().trimmed();
-            QString nickname = item.value(QString::fromLatin1(protocolBody::NICKNAME)).toString().trimmed();
-            if (nickname.isEmpty())
-            {
-                nickname = username;
-            }
-            if (username.isEmpty())
-            {
-                continue;
-            }
-            const QString label = QStringLiteral("%1（%2）").arg(nickname, username);
-            friendLabels.push_back(label);
-            friendIdsByLabel.insert(label, friendId);
-        }
-
-        if (friendLabels.isEmpty())
-        {
-            if (m_mainWindow != nullptr)
-            {
-                m_mainWindow->setMessageStatus(
-                    QStringLiteral("当前好友列表为空，请先添加好友，再新建私聊会话。"), true);
-            }
-            return;
-        }
-
-        // 使用项目的紫灰主题，避免好友选择弹窗与主界面风格差异过大。
-        QInputDialog dialog(m_mainWindow);
-        dialog.setWindowTitle(QStringLiteral("新建会话"));
-        dialog.setLabelText(QStringLiteral("选择要开始聊天的好友："));
-        dialog.setComboBoxItems(friendLabels);
-        dialog.setComboBoxEditable(false);
-        dialog.setStyleSheet(QStringLiteral(
-            "QInputDialog { background: #FCFBFF; color: #302A48; }"
-            "QLabel { color: #302A48; font-size: 13px; }"
-            "QComboBox { background: #FFFFFF; color: #302A48; border: 1px solid rgba(109,88,172,0.24); border-radius: 9px; padding: 8px 10px; min-width: 250px; }"
-            "QComboBox::drop-down { border: 0; width: 25px; }"
-            "QComboBox QAbstractItemView { background: #FFFFFF; color: #302A48; selection-background-color: #ECE6FF; selection-color: #302A48; outline: 0; }"
-            "QPushButton { background: #6A53F6; color: #FFFFFF; border: 0; border-radius: 9px; padding: 8px 18px; min-width: 70px; }"
-            "QPushButton:hover { background: #5941E7; }"
-            "QPushButton:pressed { background: #4C37CF; }"));
-        if (dialog.exec() != QDialog::Accepted)
-        {
-            return;
-        }
-        const QString selectedLabel = dialog.textValue().trimmed();
-        if (selectedLabel.isEmpty())
-        {
-            return;
-        }
-
-        const quint64 targetUserId = friendIdsByLabel.value(selectedLabel, 0);
-        if (targetUserId == 0)
-        {
-            m_mainWindow->setMessageStatus(QStringLiteral("所选好友信息无效，请重试。"), true);
-            return;
-        }
-
-        QJsonObject createBody;
-        createBody.insert(QString::fromLatin1(protocolBody::TYPE), 1);
-        createBody.insert(QString::fromLatin1(protocolBody::TARGET_USER_ID),
-                          QJsonValue(static_cast<qint64>(targetUserId)));
-        queueOrSendRequest(protocolHeader::CommandType::CHATCREATE_REQUEST, createBody);
-        m_mainWindow->setMessageStatus(QStringLiteral("正在打开好友会话……"), false);
-        return;
-    }
-
-    if (originalCommand == protocolHeader::CommandType::CHATCREATE_REQUEST)
-    {
-        if (responseCommand != protocolHeader::CommandType::PRIVATECREATE_SUCCESS)
-        {
-            QJsonParseError error;
-            const QJsonDocument responseDoc = QJsonDocument::fromJson(jsonBody, &error);
-            const QString message = error.error == QJsonParseError::NoError && responseDoc.isObject()
-                ? responseDoc.object().value(QString::fromLatin1(protocolBody::MESSAGE))
-                      .toString(QStringLiteral("创建/打开会话失败"))
-                : QStringLiteral("服务器返回了无法识别的会话创建响应");
-            if (m_mainWindow != nullptr)
-            {
-                m_mainWindow->setMessageStatus(message, true);
-            }
-            return;
-        }
-
-        QJsonParseError error;
-        const QJsonDocument responseDoc = QJsonDocument::fromJson(jsonBody, &error);
-        quint64 conversationId = 0;
-        if (error.error != QJsonParseError::NoError || !responseDoc.isObject() ||
-            !readPositiveJsonInteger(responseDoc.object(), protocolBody::CONVERSATION_ID, conversationId))
-        {
-            if (m_mainWindow != nullptr)
-            {
-                m_mainWindow->setMessageStatus(QStringLiteral("会话已创建，但服务器未返回有效 conversation_id"), true);
-            }
-            return;
-        }
-        requestConversationList(conversationId);
         return;
     }
 
@@ -893,11 +662,11 @@ void AppController::onMessageSendRequested(const QString &text,
         return;
     }
 
-    // conversationId 为 0 表示尚未选择有效的数据库会话，不能猜测目标会话。
+    // 没有真实会话 ID 时不能猜测目标会话，因此不发送网络请求。
     if (conversationId == 0)
     {
         m_mainWindow->setMessageStatus(
-            QStringLiteral("当前没有选中真实会话，请从左侧列表选择或新建会话。"), true);
+            QStringLiteral("请先选择一个真实会话，再发送消息"), true);
         return;
     }
 
@@ -1076,38 +845,305 @@ void AppController::handleIncomingMessagePush(protocolHeader::CommandType comman
     }
     else
     {
-        // 消息预览和列表顺序来自服务端数据库，收到新消息后刷新它们。
-        requestConversationList(m_mainWindow->currentConversationId());
+        // 新消息到达后更新会话列表里的摘要/排序；请求在途时只安排一次后续刷新。
+        requestConversationList();
     }
 
     Q_UNUSED(command); // 私聊/群聊命令只用来区分协议事件，气泡样式不依赖会话类型。
 }
 
-void AppController::requestConversationList(quint64 preferredConversationId)
+quint64 AppController::sendOperationRequest(protocolHeader::CommandType command,
+                                           const QJsonObject &body)
+{
+    if (!m_isAuthenticated || m_isLoggingOut || m_mainWindow == nullptr)
+    {
+        if (m_mainWindow != nullptr)
+        {
+            m_mainWindow->setMessageStatus(QStringLiteral("请先登录后再执行此操作"), true);
+        }
+        return 0;
+    }
+    if (!m_tcpClient->isConnected())
+    {
+        m_mainWindow->setMessageStatus(QStringLiteral("连接已断开，请重新登录后重试"), true);
+        return 0;
+    }
+
+    const quint64 requestId = m_nextRequestId++;
+    const PendingRequest request{command, requestId, body};
+    if (!sendRequest(request))
+    {
+        m_mainWindow->setMessageStatus(QStringLiteral("请求发送失败，请检查网络连接"), true);
+        return 0;
+    }
+
+    auto *timer = new QTimer(this);
+    timer->setSingleShot(true);
+    m_operationRequestTimers.insert(requestId, timer);
+    connect(timer, &QTimer::timeout, this, [this, requestId, command]()
+    {
+        // 如果响应已处理或连接清理已发生，此计时器不会再进入这里；仍做一次防御检查。
+        if (m_requestsAwaitingResponse.remove(requestId) == 0)
+        {
+            stopOperationRequestTimer(requestId);
+            return;
+        }
+
+        stopOperationRequestTimer(requestId);
+        switch (command)
+        {
+        case protocolHeader::CommandType::QUERY_CONVERSATION_LIST_REQUEST:
+            if (m_conversationListRequestId == requestId)
+            {
+                m_conversationListRequestId = 0;
+            }
+            m_conversationListRefreshPending = false;
+            m_pendingConversationSelectionId = 0;
+            break;
+        case protocolHeader::CommandType::QUERY_FRIEND_LIST_REQUEST:
+            if (m_friendListRequestId == requestId)
+            {
+                m_friendListRequestId = 0;
+            }
+            break;
+        case protocolHeader::CommandType::CHATCREATE_REQUEST:
+            if (m_createConversationRequestId == requestId)
+            {
+                m_createConversationRequestId = 0;
+            }
+            break;
+        default:
+            break;
+        }
+
+        if (m_mainWindow != nullptr)
+        {
+            QString status = QStringLiteral("服务器请求超时，请稍后重试");
+            if (command == protocolHeader::CommandType::QUERY_CONVERSATION_LIST_REQUEST)
+            {
+                status = QStringLiteral("会话列表加载超时，请重试");
+            }
+            else if (command == protocolHeader::CommandType::QUERY_FRIEND_LIST_REQUEST)
+            {
+                status = QStringLiteral("好友列表加载超时，请重试");
+            }
+            else if (command == protocolHeader::CommandType::CHATCREATE_REQUEST)
+            {
+                status = QStringLiteral("创建/打开会话超时，请检查连接后重试");
+            }
+            m_mainWindow->setMessageStatus(status, true);
+        }
+    });
+    timer->start(15000);
+    return requestId;
+}
+
+void AppController::stopOperationRequestTimer(quint64 requestId)
+{
+    QTimer *timer = m_operationRequestTimers.take(requestId);
+    if (timer != nullptr)
+    {
+        timer->stop();
+        timer->deleteLater();
+    }
+}
+
+void AppController::clearOperationRequestTimers()
+{
+    const auto timers = m_operationRequestTimers;
+    m_operationRequestTimers.clear();
+    for (QTimer *timer : timers)
+    {
+        if (timer != nullptr)
+        {
+            timer->stop();
+            timer->deleteLater();
+        }
+    }
+    m_conversationListRequestId = 0;
+    m_friendListRequestId = 0;
+    m_createConversationRequestId = 0;
+    m_pendingConversationSelectionId = 0;
+    m_conversationListRefreshPending = false;
+}
+
+void AppController::requestConversationList()
 {
     if (!m_isAuthenticated || m_isLoggingOut || m_mainWindow == nullptr)
     {
         return;
     }
-
-    const quint64 requestId = m_nextRequestId++;
-    m_conversationListPreferredIds.insert(requestId, preferredConversationId);
-    const PendingRequest request{
-        protocolHeader::CommandType::QUERY_CONVERSATION_LIST_REQUEST,
-        requestId,
-        QJsonObject{}};
-
-    if (m_tcpClient->isConnected())
+    if (!m_tcpClient->isConnected())
     {
-        if (!sendRequest(request))
-        {
-            m_conversationListPreferredIds.remove(requestId);
-        }
+        m_mainWindow->setMessageStatus(QStringLiteral("连接已断开，无法刷新会话列表"), true);
+        return;
+    }
+    if (m_conversationListRequestId != 0)
+    {
+        // 一次只允许一个会话列表查询在途。连续收到消息时合并刷新，避免请求风暴。
+        m_conversationListRefreshPending = true;
         return;
     }
 
-    m_pendingRequests.enqueue(request);
-    ensureServerConnection();
+    const quint64 requestId = sendOperationRequest(
+        protocolHeader::CommandType::QUERY_CONVERSATION_LIST_REQUEST, QJsonObject{});
+    if (requestId != 0)
+    {
+        m_conversationListRequestId = requestId;
+    }
+}
+
+void AppController::handleConversationListResponse(
+    protocolHeader::CommandType responseCommand,
+    const QByteArray &jsonBody)
+{
+    if (m_mainWindow == nullptr)
+    {
+        return;
+    }
+    if (responseCommand != protocolHeader::CommandType::QUERY_CONVERSATION_LIST_SUCCESS &&
+        responseCommand != protocolHeader::CommandType::QUERY_CONVERSATION_LIST_FAILED)
+    {
+        m_mainWindow->setMessageStatus(QStringLiteral("服务器返回了无法识别的会话列表响应"), true);
+        return;
+    }
+
+    QJsonParseError parseError;
+    const QJsonDocument document = QJsonDocument::fromJson(jsonBody, &parseError);
+    if (parseError.error != QJsonParseError::NoError || !document.isObject())
+    {
+        m_mainWindow->setMessageStatus(QStringLiteral("无法解析服务器返回的会话列表"), true);
+        return;
+    }
+
+    const QJsonObject body = document.object();
+    const QString serverMessage = body.value(QString::fromLatin1(protocolBody::MESSAGE))
+                                      .toString(QStringLiteral("会话列表请求已完成"));
+    if (responseCommand == protocolHeader::CommandType::QUERY_CONVERSATION_LIST_FAILED)
+    {
+        m_mainWindow->setMessageStatus(serverMessage, true);
+        return;
+    }
+
+    const QJsonValue dataValue = body.value(QString::fromLatin1(protocolBody::DATA));
+    if (!dataValue.isArray())
+    {
+        m_mainWindow->setMessageStatus(QStringLiteral("会话列表响应缺少 data 数组"), true);
+        return;
+    }
+
+    QVector<SessionItem> sessions;
+    const QJsonArray items = dataValue.toArray();
+    for (const QJsonValue &itemValue : items)
+    {
+        if (!itemValue.isObject())
+        {
+            qWarning() << "跳过非对象的会话列表项目";
+            continue;
+        }
+        const QJsonObject item = itemValue.toObject();
+        quint64 conversationId = 0;
+        if (!readPositiveJsonInteger(item, protocolBody::CONVERSATION_ID, conversationId))
+        {
+            qWarning() << "跳过缺少有效 conversation_id 的会话";
+            continue;
+        }
+
+        const QJsonValue typeValue = item.value(QString::fromLatin1(protocolBody::TYPE));
+        if (!typeValue.isDouble())
+        {
+            qWarning() << "跳过缺少会话 type 的会话" << conversationId;
+            continue;
+        }
+        const qint64 type = typeValue.toInteger(-1);
+        if (type != 1 && type != 2)
+        {
+            qWarning() << "跳过不支持的会话 type" << type;
+            continue;
+        }
+
+        QString displayName = item.value(QString::fromLatin1(protocolBody::DISPLAY_NAME)).toString().trimmed();
+        const QString username = item.value(QString::fromLatin1(protocolBody::USERNAME)).toString().trimmed();
+        if (displayName.isEmpty())
+        {
+            displayName = !username.isEmpty()
+                              ? username
+                              : (type == 2 ? QStringLiteral("未命名群聊") : QStringLiteral("未知联系人"));
+        }
+
+        SessionItem session;
+        session.id = QString::number(conversationId);
+        session.name = displayName;
+        session.time = displayConversationTime(
+            item.value(QString::fromLatin1(protocolBody::LAST_TIME)).toString());
+        session.preview = item.value(QString::fromLatin1(protocolBody::LAST_MESSAGE)).toString();
+        if (session.preview.isEmpty())
+        {
+            session.preview = QStringLiteral("暂无消息");
+        }
+        session.avatarText = displayName.left(1);
+        session.group = type == 2;
+        session.unread = false;
+        session.unreadCount = 0; // 服务端当前没有返回未读数，不显示虚构未读气泡。
+        session.conversationId = conversationId;
+
+        // 头像暂未使用图片 URL，按会话类型/顺序分配主题渐变色。
+        if (session.group)
+        {
+            session.avatarStart = Theme::MintStart;
+            session.avatarEnd = Theme::MintEnd;
+        }
+        else
+        {
+            switch (sessions.size() % 3)
+            {
+            case 0:
+                session.avatarStart = Theme::PeachStart;
+                session.avatarEnd = Theme::PeachEnd;
+                break;
+            case 1:
+                session.avatarStart = Theme::BlueStart;
+                session.avatarEnd = Theme::BlueEnd;
+                break;
+            default:
+                session.avatarStart = Theme::GoldStart;
+                session.avatarEnd = Theme::GoldEnd;
+                break;
+            }
+        }
+        sessions.push_back(session);
+    }
+
+    // 非空的服务器列表若所有条目都无效，应提示协议/数据问题，而不是伪装成空列表。
+    if (!items.isEmpty() && sessions.isEmpty())
+    {
+        m_mainWindow->setMessageStatus(QStringLiteral("服务器返回的会话列表没有有效条目"), true);
+        return;
+    }
+
+    quint64 preferredId = 0;
+    if (m_pendingConversationSelectionId != 0)
+    {
+        for (const SessionItem &session : sessions)
+        {
+            if (session.conversationId == m_pendingConversationSelectionId)
+            {
+                preferredId = m_pendingConversationSelectionId;
+                m_pendingConversationSelectionId = 0;
+                break;
+            }
+        }
+    }
+    m_mainWindow->setSessions(sessions, preferredId);
+    if (sessions.isEmpty())
+    {
+        m_mainWindow->setMessageStatus(
+            QStringLiteral("当前没有会话，点击会话栏的 + 选择好友开始私聊"), false);
+    }
+    else if (preferredId != 0)
+    {
+        m_mainWindow->setMessageStatus(QStringLiteral("已打开会话"), false);
+    }
 }
 
 void AppController::onNewSessionRequested()
@@ -1116,29 +1152,217 @@ void AppController::onNewSessionRequested()
     {
         return;
     }
-
+    if (m_friendListRequestId != 0 || m_createConversationRequestId != 0)
+    {
+        m_mainWindow->setMessageStatus(QStringLiteral("正在处理新建会话请求，请稍候"), false);
+        return;
+    }
     if (!m_tcpClient->isConnected())
     {
-        m_mainWindow->setMessageStatus(QStringLiteral("连接已断开，请重新登录后再新建会话。"), true);
+        m_mainWindow->setMessageStatus(QStringLiteral("连接已断开，请重新登录后再新建会话"), true);
         return;
     }
 
-    queueOrSendRequest(protocolHeader::CommandType::QUERY_FRIEND_LIST_REQUEST, QJsonObject{});
-    m_mainWindow->setMessageStatus(QStringLiteral("正在查询好友列表……"), false);
+    const quint64 requestId = sendOperationRequest(
+        protocolHeader::CommandType::QUERY_FRIEND_LIST_REQUEST, QJsonObject{});
+    if (requestId != 0)
+    {
+        m_friendListRequestId = requestId;
+        m_mainWindow->setMessageStatus(QStringLiteral("正在加载好友列表…"), false);
+    }
 }
 
-void AppController::onConversationSelected(quint64 conversationId)
+void AppController::handleFriendListResponse(
+    protocolHeader::CommandType responseCommand,
+    const QByteArray &jsonBody)
 {
-    if (!m_isAuthenticated || m_isLoggingOut || conversationId == 0 ||
-        m_historyCursors.contains(conversationId) ||
-        m_historyExhaustedConversations.contains(conversationId) ||
-        m_historyLoadingConversations.contains(conversationId))
+    if (m_mainWindow == nullptr)
+    {
+        return;
+    }
+    if (responseCommand != protocolHeader::CommandType::QUERY_FRIEND_LIST_SUCCESS &&
+        responseCommand != protocolHeader::CommandType::QUERY_FRIEND_LIST_FAILED)
+    {
+        m_mainWindow->setMessageStatus(QStringLiteral("服务器返回了无法识别的好友列表响应"), true);
+        return;
+    }
+
+    QJsonParseError parseError;
+    const QJsonDocument document = QJsonDocument::fromJson(jsonBody, &parseError);
+    if (parseError.error != QJsonParseError::NoError || !document.isObject())
+    {
+        m_mainWindow->setMessageStatus(QStringLiteral("无法解析服务器返回的好友列表"), true);
+        return;
+    }
+    const QJsonObject body = document.object();
+    const QString serverMessage = body.value(QString::fromLatin1(protocolBody::MESSAGE))
+                                      .toString(QStringLiteral("好友列表请求已完成"));
+    if (responseCommand == protocolHeader::CommandType::QUERY_FRIEND_LIST_FAILED)
+    {
+        m_mainWindow->setMessageStatus(serverMessage, true);
+        return;
+    }
+
+    const QJsonValue dataValue = body.value(QString::fromLatin1(protocolBody::DATA));
+    if (!dataValue.isArray())
+    {
+        m_mainWindow->setMessageStatus(QStringLiteral("好友列表响应缺少 data 数组"), true);
+        return;
+    }
+    promptFriendSelection(dataValue.toArray());
+}
+
+void AppController::promptFriendSelection(const QJsonArray &friends)
+{
+    if (m_mainWindow == nullptr)
     {
         return;
     }
 
-    // 每个会话第一次被打开时自动加载最新一页；历史按钮仍用于继续向前翻页。
-    onHistoryRequested(conversationId);
+    struct FriendChoice
+    {
+        quint64 userId;
+        QString display;
+    };
+    QVector<FriendChoice> choices;
+    for (const QJsonValue &value : friends)
+    {
+        if (!value.isObject())
+        {
+            continue;
+        }
+        const QJsonObject object = value.toObject();
+        quint64 userId = 0;
+        if (!readPositiveJsonInteger(object, protocolBody::USER_ID, userId))
+        {
+            continue;
+        }
+        const QString username = object.value(QString::fromLatin1(protocolBody::USERNAME)).toString().trimmed();
+        const QString nickname = object.value(QString::fromLatin1(protocolBody::NICKNAME)).toString().trimmed();
+        const QString name = nickname.isEmpty() ? username : nickname;
+        if (name.isEmpty())
+        {
+            continue;
+        }
+        choices.push_back({userId, username.isEmpty() || username == name
+                                       ? name
+                                       : QStringLiteral("%1  @%2").arg(name, username)});
+    }
+
+    if (choices.isEmpty())
+    {
+        m_mainWindow->setMessageStatus(
+            QStringLiteral("好友列表为空或没有有效好友，请先添加好友后再开始私聊"), false);
+        return;
+    }
+
+    QDialog dialog(m_mainWindow);
+    dialog.setWindowTitle(QStringLiteral("新建私聊"));
+    dialog.setModal(true);
+    dialog.setMinimumWidth(340);
+    dialog.setStyleSheet(QStringLiteral(
+        "QDialog { background: #FCFBFF; color: #302A48; }"
+        "QLabel { color: #504966; font-size: 13px; }"
+        "QComboBox { background: #FFFFFF; color: #302A48; border: 1px solid #DCD5F0;"
+        " border-radius: 8px; padding: 7px 9px; min-height: 22px; }"
+        "QComboBox QAbstractItemView { background: #FFFFFF; color: #302A48;"
+        " selection-background-color: #F0EBFF; selection-color: #302A48; }"
+        "QPushButton { background: #F0EDFA; color: #504966; border: 0; border-radius: 8px;"
+        " padding: 8px 16px; min-width: 68px; }"
+        "QPushButton:hover { background: #E8E1FB; }"
+        "QPushButton#startPrivateChatButton { background: #6A53F6; color: #FFFFFF; }"
+        "QPushButton#startPrivateChatButton:hover { background: #5941E7; }"));
+
+    auto *layout = new QVBoxLayout(&dialog);
+    layout->setContentsMargins(20, 18, 20, 18);
+    layout->setSpacing(12);
+    auto *label = new QLabel(QStringLiteral("选择一位好友，打开或创建私聊会话"), &dialog);
+    auto *combo = new QComboBox(&dialog);
+    for (const FriendChoice &choice : choices)
+    {
+        combo->addItem(choice.display, QVariant::fromValue<qulonglong>(choice.userId));
+    }
+    auto *buttonRow = new QHBoxLayout;
+    buttonRow->addStretch(1);
+    auto *cancelButton = new QPushButton(QStringLiteral("取消"), &dialog);
+    auto *startButton = new QPushButton(QStringLiteral("打开会话"), &dialog);
+    startButton->setObjectName(QStringLiteral("startPrivateChatButton"));
+    buttonRow->addWidget(cancelButton);
+    buttonRow->addWidget(startButton);
+    layout->addWidget(label);
+    layout->addWidget(combo);
+    layout->addLayout(buttonRow);
+    connect(cancelButton, &QPushButton::clicked, &dialog, &QDialog::reject);
+    connect(startButton, &QPushButton::clicked, &dialog, &QDialog::accept);
+
+    if (dialog.exec() != QDialog::Accepted)
+    {
+        return;
+    }
+
+    const quint64 targetUserId = combo->currentData().toULongLong();
+    if (targetUserId == 0)
+    {
+        m_mainWindow->setMessageStatus(QStringLiteral("所选好友 ID 无效，无法创建会话"), true);
+        return;
+    }
+
+    QJsonObject body;
+    body.insert(QString::fromLatin1(protocolBody::TYPE), 1); // 1=私聊。
+    body.insert(QString::fromLatin1(protocolBody::TARGET_USER_ID),
+                QJsonValue(static_cast<qint64>(targetUserId)));
+    const quint64 requestId = sendOperationRequest(
+        protocolHeader::CommandType::CHATCREATE_REQUEST, body);
+    if (requestId != 0)
+    {
+        m_createConversationRequestId = requestId;
+        m_mainWindow->setMessageStatus(QStringLiteral("正在打开私聊会话…"), false);
+    }
+}
+
+void AppController::handleCreateConversationResponse(
+    protocolHeader::CommandType responseCommand,
+    const QByteArray &jsonBody)
+{
+    if (m_mainWindow == nullptr)
+    {
+        return;
+    }
+    if (responseCommand != protocolHeader::CommandType::PRIVATECREATE_SUCCESS &&
+        responseCommand != protocolHeader::CommandType::PRIVATECREATE_FAILED)
+    {
+        m_mainWindow->setMessageStatus(QStringLiteral("服务器返回了无法识别的创建会话响应"), true);
+        return;
+    }
+
+    QJsonParseError parseError;
+    const QJsonDocument document = QJsonDocument::fromJson(jsonBody, &parseError);
+    if (parseError.error != QJsonParseError::NoError || !document.isObject())
+    {
+        m_mainWindow->setMessageStatus(QStringLiteral("无法解析服务器返回的创建会话结果"), true);
+        return;
+    }
+    const QJsonObject body = document.object();
+    const QString serverMessage = body.value(QString::fromLatin1(protocolBody::MESSAGE))
+                                      .toString(QStringLiteral("创建会话请求已完成"));
+    if (responseCommand == protocolHeader::CommandType::PRIVATECREATE_FAILED)
+    {
+        m_mainWindow->setMessageStatus(serverMessage, true);
+        return;
+    }
+
+    // 创建会话的旧响应格式暂时保留：conversation_id 仍在 JSON 最外层。
+    // 等客户端/服务端一起迁移时，再统一改成 data.conversation_id。
+    quint64 conversationId = 0;
+    if (!readPositiveJsonInteger(body, protocolBody::CONVERSATION_ID, conversationId))
+    {
+        m_mainWindow->setMessageStatus(QStringLiteral("创建会话成功响应缺少有效 conversation_id"), true);
+        return;
+    }
+
+    m_pendingConversationSelectionId = conversationId;
+    requestConversationList();
+    m_mainWindow->setMessageStatus(QStringLiteral("会话已创建/打开，正在刷新会话列表…"), false);
 }
 
 void AppController::onHistoryRequested(quint64 conversationId)
@@ -1364,19 +1588,16 @@ void AppController::onLoginSucceeded()
                 this, &AppController::onHistoryRequested);
         connect(m_mainWindow, &MainWindow::messageSendRequested,
                 this, &AppController::onMessageSendRequested);
-        connect(m_mainWindow, &MainWindow::conversationSelected,
-                this, &AppController::onConversationSelected);
         connect(m_mainWindow, &MainWindow::newSessionRequested,
                 this, &AppController::onNewSessionRequested);
     }
 
+    m_mainWindow->clearSessions();
     m_mainWindow->setCurrentUsername(m_currentAccount);
     m_mainWindow->show();
     m_mainWindow->raise();
     m_mainWindow->activateWindow();
     m_loginWindow->hide();
-
-    // 登录成功后用当前连接的认证身份查询真实会话，不再展示硬编码示例项。
     requestConversationList();
 }
 
@@ -1414,13 +1635,15 @@ void AppController::clearPendingRequests()
     m_isLoggingOut = false;
     m_requestTimer.stop();
     clearMessageRequestTimers();
+    clearOperationRequestTimers();
     m_pendingRequests.clear();
     m_requestsAwaitingResponse.clear();
-    m_conversationListPreferredIds.clear();
 }
 
 void AppController::returnToLoginWindow()
 {
+    // 不让上一账号未完成的会话列表/好友列表/消息请求在下次登录后更新界面。
+    clearPendingRequests();
     for (auto it = m_historyRequests.cbegin(); it != m_historyRequests.cend(); ++it)
     {
         m_requestsAwaitingResponse.remove(it.key());
@@ -1438,16 +1661,12 @@ void AppController::returnToLoginWindow()
     m_historyCursors.clear();
     m_historyLoadingConversations.clear();
     m_historyExhaustedConversations.clear();
-    m_pendingRequests.clear();
-    m_requestsAwaitingResponse.clear();
-    m_conversationListPreferredIds.clear();
-    clearMessageRequestTimers();
     // 此方法不负责修改登录状态；调用者应先更新 m_isAuthenticated 和用户信息。
     if (m_mainWindow != nullptr)
     {
-        // 主窗口会在下次登录时复用，但内存消息不能跨账号保留。
+        // 主窗口会在下次登录时复用，但消息和会话列表不能跨账号保留。
         m_mainWindow->clearMessages();
-        m_mainWindow->setConversations(QVector<SessionItem>{});
+        m_mainWindow->clearSessions();
         m_mainWindow->hide();
     }
 

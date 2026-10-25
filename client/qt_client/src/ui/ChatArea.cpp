@@ -154,20 +154,21 @@ ChatArea::ChatArea(QWidget *parent)
         }
         else
         {
-            setMessageStatus(QStringLiteral("当前没有选中真实会话，请先从左侧列表选择会话。"), true);
+            setMessageStatus(QStringLiteral("请先选择一个真实会话，再加载历史消息"), true);
         }
     });
 }
 
 void ChatArea::setConversationInfo(const QString &name,
                                    const QString &avatarText,
-                                   bool online)
+                                   const QString &statusText)
 {
     m_nameLabel->setText(name);
     m_avatarLabel->setText(avatarText.isEmpty() ? QStringLiteral("?") : avatarText.left(1));
-    m_statusLabel->setText(online ? QStringLiteral("在线") : QStringLiteral("离线"));
+    m_statusLabel->setText(statusText);
 
-    // 动态属性由 QSS 控制在线绿点和离线灰点的颜色。
+    // 当前服务端尚未提供在线状态：只有明确显示“在线”时才点亮绿点。
+    const bool online = statusText == QStringLiteral("在线");
     m_statusDot->setProperty("online", online);
     m_statusDot->style()->unpolish(m_statusDot);
     m_statusDot->style()->polish(m_statusDot);
@@ -231,7 +232,7 @@ void ChatArea::setCurrentConversationId(quint64 conversationId)
     m_currentConversationId = conversationId;
     m_messageFilterModel->setConversationId(conversationId);
 
-    // 切换会话时恢复历史按钮状态；ID 为 0 时不可查询历史消息。
+    // 切换会话时恢复历史按钮状态；ID 为 0 时禁止查询历史消息。
     if (m_inputBar != nullptr)
     {
         m_inputBar->setHistoryLoading(false, true, conversationId != 0);

@@ -88,8 +88,8 @@ QWidget *MainWindow::createChatWorkspacePage()
     connect(sideBar, &SideBar::logoutRequested,
             this, &MainWindow::logoutRequested);
 
-    auto *sessionPanel = new SessionListPanel(splitter);
-    m_sessionListPanel = sessionPanel;
+    m_sessionPanel = new SessionListPanel(splitter);
+    SessionListPanel *sessionPanel = m_sessionPanel;
     // SessionListPanel 自己设置了 220–340px 的宽度范围；这里给它 240px 初始宽度。
     sessionPanel->resize(Theme::ConversationWidth, sessionPanel->height());
     connect(sessionPanel, &SessionListPanel::newSessionRequested,
@@ -97,7 +97,7 @@ QWidget *MainWindow::createChatWorkspacePage()
 
     m_chatArea = new ChatArea(splitter);
     ChatArea *chatArea = m_chatArea;
-    chatArea->setConversationInfo(QStringLiteral("请选择会话"), QStringLiteral("聊"), false);
+    chatArea->setConversationInfo(QStringLiteral("选择会话"), QString(), QStringLiteral("等待加载会话列表"));
 
     // 输入区只发出“用户想发送什么”；网络请求由 AppController 统一处理。
     connect(chatArea, &ChatArea::sendRequested, this,
@@ -124,7 +124,7 @@ QWidget *MainWindow::createChatWorkspacePage()
     layout->setSpacing(0);
     layout->addWidget(splitter);
 
-    // 点击会话时，把真实会话的标题、类型和数据库 Conversation.id 同步到聊天区。
+    // 点击真实会话时，把名称、会话类型和数据库 conversation_id 同步到聊天区。
     connect(sessionPanel, &SessionListPanel::sessionActivated, this,
             [this, sessionPanel, chatArea](const QString &sessionId)
             {
@@ -134,18 +134,23 @@ QWidget *MainWindow::createChatWorkspacePage()
                     const SessionItem *session = model->sessionAt(row);
                     if (session != nullptr && session->id == sessionId)
                     {
-                        chatArea->setConversationInfo(session->name, session->avatarText, true);
                         m_currentConversationId = session->conversationId;
                         m_currentConversationIsGroup = session->group;
+                        chatArea->setConversationInfo(
+                            session->name,
+                            session->avatarText,
+                            session->group ? QStringLiteral("群聊") : QStringLiteral("私聊"));
                         chatArea->setCurrentConversationId(m_currentConversationId);
-                        if (m_currentConversationId != 0)
+                        // 切换到真实会话时自动加载最新一页历史消息。
+                        if (m_currentConversationId > 0)
                         {
-                            emit conversationSelected(m_currentConversationId);
+                            emit historyRequested(m_currentConversationId);
                         }
                         break;
                     }
                 }
             });
+
 
     return page;
 }
@@ -499,36 +504,38 @@ bool MainWindow::eventFilter(QObject *watched, QEvent *event)
 }
 
 
-void MainWindow::setConversations(const QVector<SessionItem> &sessions,
-                                   quint64 preferredConversationId)
-{
-    if (m_sessionListPanel == nullptr || m_chatArea == nullptr)
-    {
-        return;
-    }
-
-    if (sessions.isEmpty())
-    {
-        m_currentConversationId = 0;
-        m_currentConversationIsGroup = false;
-        m_chatArea->setCurrentConversationId(0);
-        m_chatArea->clearMessages();
-        m_chatArea->setConversationInfo(QStringLiteral("暂无会话"), QStringLiteral("聊"), false);
-    }
-
-    // 面板在选择到目标项后会发出 sessionActivated，主窗口的现有连接负责更新当前会话。
-    m_sessionListPanel->setSessions(sessions, preferredConversationId);
-}
-
-quint64 MainWindow::currentConversationId() const
-{
-    return m_currentConversationId;
-}
-
 void MainWindow::setHistoryLoading(quint64 conversationId, bool loading, bool hasMore)
 {
     if (conversationId == m_currentConversationId && m_chatArea != nullptr)
     {
         m_chatArea->setHistoryLoading(loading, hasMore);
     }
+}
+
+void MainWindow::setSessions(const QVector<SessionItem> &sessions,
+                             quint64 preferredConversationId)
+{
+    if (m_sessionPanel == nullptr)
+    {
+        return;
+    }
+
+    m_sessionPanel->setSessions(sessions, preferredConversationId);
+    if (sessions.isEmpty())
+    {
+        m_currentConversationId = 0;
+        m_currentConversationIsGroup = false;
+        if (m_chatArea != nullptr)
+        {
+            m_chatArea->setCurrentConversationId(0);
+            m_chatArea->setConversationInfo(
+                QStringLiteral("暂无会话"), QString(), QStringLiteral("点击 + 选择好友开始私聊"));
+            m_chatArea->setHistoryLoading(false, true);
+        }
+    }
+}
+
+void MainWindow::clearSessions()
+{
+    setSessions({});
 }

@@ -25,7 +25,7 @@
 SessionListModel::SessionListModel(QObject *parent)
     : QAbstractListModel(parent)
 {
-    // 登录前不显示演示会话；登录后由服务端会话列表响应填充模型。
+    // 初始为空；只有收到服务端会话列表后才展示真实会话。
 }
 
 int SessionListModel::rowCount(const QModelIndex &parent) const
@@ -291,9 +291,7 @@ SessionListPanel::SessionListPanel(QWidget *parent)
     setupUi();
     setupConnections();
 
-    // 默认选中第一条会话，让选中态样式在初次显示时即可看到。
-    if (m_proxyModel->rowCount() > 0)
-        m_listView->setCurrentIndex(m_proxyModel->index(0, 0));
+    // 没有服务端数据时保持空列表，不显示演示会话。
 }
 
 void SessionListPanel::setupUi()
@@ -402,6 +400,11 @@ void SessionListPanel::setupConnections()
 
     connect(m_listView, &QListView::clicked, this, [this](const QModelIndex &proxyIndex) {
         const QString id = proxyIndex.data(SessionListModel::IdRole).toString();
+        if (id.isEmpty() || id == m_selectedSessionId)
+        {
+            return;
+        }
+        m_selectedSessionId = id;
         emit sessionActivated(id);
     });
 }
@@ -427,44 +430,106 @@ void SessionListPanel::setActiveFilter(SessionFilterProxyModel::Filter filter)
 void SessionListPanel::setSessions(const QVector<SessionItem> &sessions,
                                    quint64 preferredConversationId)
 {
+    // 优先打开调用方指定的会话；否则尽可能保留用户当前选中的会话。
+    const QString oldSelectedId = m_selectedSessionId;
     m_sourceModel->setSessions(sessions);
-    m_listView->clearSelection();
-    m_listView->setCurrentIndex(QModelIndex());
 
-    if (m_proxyModel->rowCount() == 0)
+    if (sessions.isEmpty())
     {
+        m_selectedSessionId.clear();
+        m_listView->setCurrentIndex(QModelIndex());
+        // 切换账号后不保留上一个账号的搜索/筛选条件，避免真实会话被旧条件全部隐藏。
+        m_searchEdit->clear();
+        m_allFilterButton->setChecked(true);
+        m_proxyModel->setFilter(SessionFilterProxyModel::Filter::All);
         return;
     }
 
-    // 默认显示所有会话，防止“群聊”筛选器把刚打开的私聊隐藏。
-    setActiveFilter(SessionFilterProxyModel::Filter::All);
-
-    QModelIndex selectedIndex;
-    if (preferredConversationId != 0)
+    const QString preferredId = preferredConversationId > 0
+                                    ? QString::number(preferredConversationId)
+                                    : oldSelectedId;
+    if (!preferredId.isEmpty())
     {
+        bool exists = false;
         for (int row = 0; row < m_sourceModel->rowCount(); ++row)
         {
             const SessionItem *item = m_sourceModel->sessionAt(row);
-            if (item != nullptr && item->conversationId == preferredConversationId)
+            if (item != nullptr && item->id == preferredId)
             {
-                selectedIndex = m_proxyModel->mapFromSource(m_sourceModel->index(row, 0));
+                exists = true;
                 break;
             }
         }
+        if (exists && selectConversationById(preferredId.toULongLong()))
+        {
+            return;
+        }
     }
 
-    // 找不到指定 ID 时，退回列表第一条；空列表则保持未选中状态。
-    if (!selectedIndex.isValid())
+    // 当前会话已不存在（例如刚退出一个账号），选中首条真实会话。
+    if (m_proxyModel->rowCount() > 0)
     {
-        selectedIndex = m_proxyModel->index(0, 0);
+        const QModelIndex first = m_proxyModel->index(0, 0);
+        const QString firstId = first.data(SessionListModel::IdRole).toString();
+        m_listView->setCurrentIndex(first);
+        if (m_selectedSessionId != firstId)
+        {
+            m_selectedSessionId = firstId;
+            emit sessionActivated(firstId);
+        }
+    }
+    else
+    {
+        m_selectedSessionId.clear();
+        m_listView->setCurrentIndex(QModelIndex());
+    }
+}
+
+bool SessionListPanel::selectConversationById(quint64 conversationId)
+{
+    if (conversationId == 0)
+    {
+        return false;
     }
 
-    m_listView->setCurrentIndex(selectedIndex);
-    const QString sessionId = selectedIndex.data(SessionListModel::IdRole).toString();
-    if (!sessionId.isEmpty())
+    const QString wantedId = QString::number(conversationId);
+    QModelIndex sourceIndex;
+    for (int row = 0; row < m_sourceModel->rowCount(); ++row)
     {
-        emit sessionActivated(sessionId);
+        const SessionItem *item = m_sourceModel->sessionAt(row);
+        if (item != nullptr && item->id == wantedId)
+        {
+            sourceIndex = m_sourceModel->index(row, 0);
+            break;
+        }
     }
+    if (!sourceIndex.isValid())
+    {
+        return false;
+    }
+
+    QModelIndex proxyIndex = m_proxyModel->mapFromSource(sourceIndex);
+    if (!proxyIndex.isValid())
+    {
+        // 新建会话后，即使搜索/筛选条件挡住了它，也要让用户看到刚打开的会话。
+        m_searchEdit->clear();
+        m_allFilterButton->setChecked(true);
+        m_proxyModel->setFilter(SessionFilterProxyModel::Filter::All);
+        proxyIndex = m_proxyModel->mapFromSource(sourceIndex);
+    }
+    if (!proxyIndex.isValid())
+    {
+        return false;
+    }
+
+    m_listView->setCurrentIndex(proxyIndex);
+    m_listView->scrollTo(proxyIndex);
+    if (m_selectedSessionId != wantedId)
+    {
+        m_selectedSessionId = wantedId;
+        emit sessionActivated(wantedId);
+    }
+    return true;
 }
 
 SessionListModel *SessionListPanel::sessionModel() const
