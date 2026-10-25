@@ -88,3 +88,72 @@ QLabel#navUserAvatar {
     font-size: 10px;
     font-weight: 800;
 }
+
+
+/* “更多”弹出菜单：外层使用独立底板，不让平台默认的菜单项背景透出来。 */
+QMenu#moreMenu {
+    background-color: #FBFAFF;
+    border: none;
+    border-radius: 10px;
+    padding: 4px;
+}
+
+/* QWidgetAction 默认会被 QMenu 当成菜单项布局；禁用其默认选中/悬停底色，
+   避免在圆角按钮后面出现直角矩形。 */
+QMenu#moreMenu::item {
+    background: transparent;
+    border: none;
+    padding: 0px;
+    margin: 0px;
+}
+
+QMenu#moreMenu::item:selected,
+QMenu#moreMenu::item:hover,
+QMenu#moreMenu::item:pressed {
+    background: transparent;
+    border: none;
+}
+
+/* 自定义退出登录菜单项的容器只负责布局，不绘制底色或边框。 */
+QWidget#logoutMenuContainer {
+    background-color: #F7F4FF;
+    border: none;
+    border-radius: 8px;
+    padding: 0px;
+    margin: 0px;
+}
+
+/* 默认、悬停和按下共用相同尺寸、相同 8px 圆角；只改变背景色和文字颜色。 */
+QPushButton#logoutMenuButton {
+    color: #57516F;
+    background-color: #F7F4FF;
+    border: none;
+    border-radius: 8px;
+    padding: 0px;
+    margin: 0px;
+    min-width: 108px;
+    max-width: 108px;
+    min-height: 34px;
+    max-height: 34px;
+    font-size: 12px;
+    font-weight: 500;
+}
+
+QPushButton#logoutMenuButton:hover {
+    color: #6650F5;
+    background-color: #E9E3FF;
+    border: none;
+    border-radius: 8px;
+}
+
+QPushButton#logoutMenuButton:pressed {
+    color: #5A43E8;
+    background-color: #DCD2FF;
+    border: none;
+    border-radius: 8px;
+}
+
+QPushButton#logoutMenuButton:focus {
+    border: none;
+    outline: none;
+}

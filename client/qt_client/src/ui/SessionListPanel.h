@@ -6,6 +6,7 @@
 #include <QStyledItemDelegate>
 #include <QWidget>
 #include <QVector>
+#include <QtGlobal>
 
 class QButtonGroup;
 class QLineEdit;
@@ -26,6 +27,7 @@ struct SessionItem
     int unreadCount = 0;        // 未读消息数；0 表示不显示未读气泡
     bool group = false;          // 是否为群聊
     bool unread = false;         // 是否属于“未读”筛选项
+    quint64 conversationId = 0;  // 数据库 Conversation.id；0 表示当前仍是演示会话，不能真实发送消息。
 };
 
 // QListView 使用的数据模型：只负责保存会话数据并向视图提供角色数据。

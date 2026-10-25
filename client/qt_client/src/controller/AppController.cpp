@@ -3,49 +3,69 @@
 #include "network/TcpClient.h"
 #include "ui/LoginWindow.h"
 #include "ui/MainWindow.h"
-#include "protocol/ProtocolBody.h"
 #include "ui/ModernMessageBox.h"
+#include "protocol/ProtocolBody.h"
 
 #include <QCoreApplication>
 #include <QJsonDocument>
 #include <QJsonObject>
+#include <QJsonValue>
 #include <QSettings>
 #include <QWidget>
+#include <QUuid>
 
 AppController::AppController(QObject *parent)
     : QObject(parent),
-      // TcpClient 以 AppController 为父对象，生命周期交给 Qt 的 QObject 父子机制管理。
+      // TcpClient 是普通 QObject 子对象，由 AppController 自动管理其生命周期。
       m_tcpClient(new TcpClient(this)),
-      // LoginWindow 是顶层窗口，不设置 QWidget 父对象。
+      // LoginWindow 是顶层窗口，不能设置成 AppController 的 QWidget 子窗口。
       m_loginWindow(new LoginWindow)
 {
-    // 认证请求最多等待 15 秒。超时后允许用户再次发起登录/注册。
-    m_authRequestTimer.setSingleShot(true);
-    connect(&m_authRequestTimer, &QTimer::timeout, this, [this]()
+    // 所有需要等待服务器结果的操作共用一个单次计时器。
+    // 超时后结束当前请求，避免界面永久卡在“请求处理中”。
+    m_requestTimer.setSingleShot(true);
+    connect(&m_requestTimer, &QTimer::timeout, this, [this]()
     {
-        m_authRequestPending = false;
-        m_pendingRequests.clear();
-        m_requestsAwaitingResponse.clear();
+        const bool logoutTimedOut = m_isLoggingOut;
+        const bool authTimedOut = m_authRequestPending;
 
-        showResponseMessage(
-            QStringLiteral("服务器响应超时"),
-            QStringLiteral("服务器暂时没有返回登录/注册结果，请检查服务端后重试。"),
-            true);
+        clearPendingRequests();
+        m_pendingLoginAccount.clear();
+
+        if (logoutTimedOut)
+        {
+            // 退出请求超时意味着客户端无法确认服务端是否完成退出。
+            // 断开 TCP 连接可让服务端清理当前连接对应的会话，客户端随后回到登录页。
+            m_isAuthenticated = false;
+            m_currentAccount.clear();
+            returnToLoginWindow();
+            m_tcpClient->abortConnection();
+            showResponseMessage(
+                QStringLiteral("退出登录超时"),
+                QStringLiteral("暂时无法确认服务器是否完成退出登录。客户端已返回登录界面，请重新登录。"),
+                true);
+        }
+        else if (authTimedOut)
+        {
+            // 登录请求可能已被服务器处理，只是响应没有到达客户端。
+            // 主动断开连接，避免服务端已登录而客户端仍停留在登录页的状态不一致。
+            m_tcpClient->abortConnection();
+            showResponseMessage(
+                QStringLiteral("服务器响应超时"),
+                QStringLiteral("服务器暂时没有返回登录/注册结果，请检查服务端后重试。"),
+                true);
+        }
     });
 
-    // 登录窗口只负责采集用户输入并发出信号，不直接访问网络。
-    // 登录请求由 AppController 接手，避免 UI 类和 TCP 层相互耦合。
+    // 登录窗口只采集用户输入；所有业务处理都交由 AppController。
     connect(m_loginWindow, &LoginWindow::loginRequested,
             this, &AppController::onLoginRequested);
     connect(m_loginWindow, &LoginWindow::registerRequested,
             this, &AppController::onRegisterRequested);
-
-    // LoginWindow 只有在业务层确认登录成功后才会发出 loginSucceeded。
-    // 收到这个信号后，AppController 才会显示聊天主窗口。
     connect(m_loginWindow, &LoginWindow::loginSucceeded,
             this, &AppController::onLoginSucceeded);
 
-    // TCP 连接成功、断开或发生错误时，由 TcpClient 通过信号通知控制器。
+    // 监听 TCP 连接状态。
     connect(m_tcpClient, &TcpClient::connectedToServer,
             this, &AppController::onConnectedToServer);
     connect(m_tcpClient, &TcpClient::disconnectedFromServer,
@@ -53,62 +73,55 @@ AppController::AppController(QObject *parent)
     connect(m_tcpClient, &TcpClient::connectionError,
             this, &AppController::onConnectionError);
 
-    // 收到无法处理的数据包时，提示协议错误。
-    // 这里使用 lambda 是因为本次只做简单的转发，不需要再单独声明一个槽函数。
+    // 协议错误意味着当前数据包无法安全处理。清理请求状态，防止一直等待响应。
     connect(m_tcpClient, &TcpClient::protocolError,
             this, [this](const QString &message)
     {
-        // 协议错误意味着当前数据无法继续按正常请求处理。
-        // 清理认证状态，避免随后断开连接时再次弹出重复提示。
-        m_authRequestPending = false;
-        m_authRequestTimer.stop();
-        m_pendingRequests.clear();
-        m_requestsAwaitingResponse.clear();
+        const bool hadSession = m_isAuthenticated || m_isLoggingOut;
+        clearPendingRequests();
+        m_pendingLoginAccount.clear();
+
+        if (hadSession)
+        {
+            m_isAuthenticated = false;
+            m_currentAccount.clear();
+            returnToLoginWindow();
+        }
 
         showResponseMessage(QStringLiteral("通信协议错误"), message, true);
     });
 
-    // TcpClient 已经完成 TCP 数据读取和协议拆包；控制器只处理完整的数据包。
+    // TcpClient 已负责 TCP 拆包，这里收到的是一整条协议消息。
     connect(m_tcpClient, &TcpClient::packetReceived,
             this, &AppController::onPacketReceived);
 
-    // 应用启动后先显示欢迎/登录窗口。
+    // 启动时显示登录窗口，但不主动连接服务器。
     m_loginWindow->show();
-
-    // 启动时只读取并验证配置，不立即连接服务器。
-    // 这样用户打开客户端时，即使服务端还没启动，也不会立刻被连接错误弹窗打断。
-    // 真正提交登录或注册时，queueOrSendRequest() 才会按需建立连接。
     m_configurationValid = loadClientConfig();
 }
 
 AppController::~AppController()
 {
-    // LoginWindow 和 MainWindow 都是独立的顶层窗口，不会因为本对象销毁而自动释放。
-    // 因此需要在析构函数中手动删除它们。
+    // 两个窗口都是独立顶层窗口，需由控制器手动释放。
     delete m_mainWindow;
     delete m_loginWindow;
-
-    // 不需要手动 delete m_tcpClient：它以 this 为 QObject 父对象，基类析构时会自动释放。
+    // m_tcpClient 以 this 为父对象，会由 QObject 自动释放。
 }
 
 bool AppController::loadClientConfig()
 {
-    // applicationDirPath() 返回可执行文件所在目录。
-    // CMake 会把 config/client.conf 复制到这个目录，运行时便不依赖当前工作目录。
+    // 配置文件从 exe 所在目录读取；请修改运行目录下实际使用的 client.conf。
     const QString configPath =
         QCoreApplication::applicationDirPath() + QStringLiteral("/client.conf");
     QSettings settings(configPath, QSettings::IniFormat);
 
-    // 如果配置文件中没有该项，则默认使用本机地址 127.0.0.1。
-    // 若服务端运行在另一台主机/虚拟机上，需要把这里的配置改为服务端实际 IP。
-    m_serverHost = settings.value(QStringLiteral("SERVER_HOST"),
-                                  QStringLiteral("192.168.230.128")).toString().trimmed();
+    m_serverHost = settings.value(
+        QStringLiteral("SERVER_HOST"),
+        QStringLiteral("192.168.230.128")).toString().trimmed();
 
     bool portOk = false;
-    // toInt 的第二个参数用于接收转换是否成功的结果。
     const int port = settings.value(QStringLiteral("SERVER_PORT"), 8888).toInt(&portOk);
 
-    // 合法端口必须在 1 到 65535 之间；主机地址不能为空。
     if (m_serverHost.isEmpty() || !portOk || port < 1 || port > 65535)
     {
         showResponseMessage(
@@ -118,7 +131,6 @@ bool AppController::loadClientConfig()
         return false;
     }
 
-    // 上面已确认端口范围合法，所以可以安全转换为 quint16。
     m_serverPort = static_cast<quint16>(port);
     return true;
 }
@@ -127,11 +139,8 @@ void AppController::onLoginRequested(const QString &account,
                                      const QString &password,
                                      bool rememberMe)
 {
-    // 当前服务端协议还没有处理“记住我”的字段，因此暂时不将它发送给服务器。
-    // Q_UNUSED 用于明确告诉编译器：这个参数当前有意未使用。
     Q_UNUSED(rememberMe);
 
-    // 配置无效时不排队请求，否则没有有效服务器地址可供连接。
     if (!m_configurationValid)
     {
         showResponseMessage(QStringLiteral("无法登录"),
@@ -139,16 +148,20 @@ void AppController::onLoginRequested(const QString &account,
         return;
     }
 
-    // 一次登录/注册还未返回结果时，不允许重复提交另一个认证请求。
-    if (m_authRequestPending)
+    if (m_isAuthenticated)
     {
-        showResponseMessage(QStringLiteral("请求处理中"),
-                            QStringLiteral("登录或注册请求正在处理中，请稍候。"), false);
+        showResponseMessage(QStringLiteral("当前已登录"),
+                            QStringLiteral("当前账号已经登录，请先退出登录再切换账号。"), false);
         return;
     }
 
-    // 去掉账号首尾的空白，避免用户意外输入空格导致登录失败。
-    // 密码不做 trim，因为密码中的空格可能是用户实际设置的内容。
+    if (m_authRequestPending || m_isLoggingOut)
+    {
+        showResponseMessage(QStringLiteral("请求处理中"),
+                            QStringLiteral("当前请求正在处理中，请稍候。"), false);
+        return;
+    }
+
     const QString normalizedAccount = account.trimmed();
     if (normalizedAccount.isEmpty() || password.isEmpty())
     {
@@ -157,23 +170,15 @@ void AppController::onLoginRequested(const QString &account,
         return;
     }
 
-    // QJsonObject 用于构造 JSON 请求体，TcpClient 会把它序列化为 UTF-8 JSON。
     QJsonObject body;
-
-    // UI 使用 account 这个名称表示账号，但当前服务端的登录校验实际读取 username。
-    // 因此同时写入 account 和协议要求的 username：当前服务端读取 username，account 作为兼容字段保留。
+    // 当前服务端读取 username；account 是界面语义字段，作为兼容字段一并保留。
     body.insert(QStringLiteral("account"), normalizedAccount);
     body.insert(QString::fromLatin1(protocolBody::USERNAME), normalizedAccount);
-
-    // 密码字段名必须与公共协议中的 PASSWORD 保持一致。
     body.insert(QString::fromLatin1(protocolBody::PASSWORD), password);
 
-    // 标记认证请求处理中，避免重复点击登录。
-    // 如果发送失败或连接中断，相关错误处理会清除此状态。
+    m_pendingLoginAccount = normalizedAccount;
     m_authRequestPending = true;
-    m_authRequestTimer.start(15000);
-
-    // 命令类型告诉服务器这是登录请求；requestId 由后续发送流程分配。
+    m_requestTimer.start(15000);
     queueOrSendRequest(protocolHeader::CommandType::LOGIN_REQUEST, body);
 }
 
@@ -187,10 +192,17 @@ void AppController::onRegisterRequested(const QString &account,
         return;
     }
 
-    if (m_authRequestPending)
+    if (m_isAuthenticated)
+    {
+        showResponseMessage(QStringLiteral("当前已登录"),
+                            QStringLiteral("当前账号已经登录，请先退出登录再注册或切换账号。"), false);
+        return;
+    }
+
+    if (m_authRequestPending || m_isLoggingOut)
     {
         showResponseMessage(QStringLiteral("请求处理中"),
-                            QStringLiteral("登录或注册请求正在处理中，请稍候。"), false);
+                            QStringLiteral("当前请求正在处理中，请稍候。"), false);
         return;
     }
 
@@ -202,105 +214,93 @@ void AppController::onRegisterRequested(const QString &account,
         return;
     }
 
-    // 注册请求同样使用 JSON 保存各字段。
     QJsonObject body;
     body.insert(QStringLiteral("account"), normalizedAccount);
     body.insert(QString::fromLatin1(protocolBody::USERNAME), normalizedAccount);
     body.insert(QString::fromLatin1(protocolBody::PASSWORD), password);
-
-    // 当前服务端注册接口还要求 nickname，但目前的注册界面只有账号和密码两个输入项。
-    // 这里暂时用账号作为初始昵称；日后增加昵称输入框，再把这个值换成用户填写的昵称。
+    // 当前注册表单还没有单独的昵称输入项，暂时以账号作为初始昵称。
     body.insert(QString::fromLatin1(protocolBody::NICKNAME), normalizedAccount);
 
-    // 与登录共用一个认证请求状态，避免同时发送登录和注册请求。
     m_authRequestPending = true;
-    m_authRequestTimer.start(15000);
+    m_requestTimer.start(15000);
     queueOrSendRequest(protocolHeader::CommandType::REGISTER_REQUEST, body);
 }
 
 void AppController::queueOrSendRequest(protocolHeader::CommandType command,
                                        const QJsonObject &body)
 {
-    // 为这个请求分配一个请求编号，并把命令和 JSON 内容一起保存。
-    // 编号会写进协议头，服务器响应时可以带回相同编号。
-    PendingRequest request{command, m_nextRequestId++, body};
+    const PendingRequest request{command, m_nextRequestId++, body};
 
-    // 如果 TCP 已经连接，马上发送即可。
     if (m_tcpClient->isConnected())
     {
         sendRequest(request);
         return;
     }
 
-    // TCP 连接建立是异步的，点击登录时连接可能还没有成功。
-    // 先把请求放入队列，连接成功后再发送，避免请求因为“尚未连接”而丢失。
+    // TCP 连接建立是异步的；连接成功前先保存请求，避免用户点击太快导致请求丢失。
     m_pendingRequests.enqueue(request);
-
-    // 如果尚未开始连接，发起连接；若已经连接中则不会重复连接。
     ensureServerConnection();
 }
 
 bool AppController::sendRequest(const PendingRequest &request)
 {
-    // sendRequest 内部会把 JSON 转成字节、加上协议头，再通过 QTcpSocket::write 发送。
-    // 如果连接已经断开或编码/写入失败，TcpClient 会返回 false。
     if (!m_tcpClient->sendRequest(request.command, request.requestId, request.body))
     {
-        // TcpClient 在发送失败时会发出 connectionError 或 protocolError，
-        // 由对应信号统一显示错误。这里清理状态，避免重复弹出两个提示框。
-        m_authRequestPending = false;
-        m_authRequestTimer.stop();
-        m_pendingRequests.clear();
-        m_requestsAwaitingResponse.clear();
+        // TcpClient 会发出 connectionError/protocolError，具体提示由相应槽函数统一处理。
+        clearPendingRequests();
+        m_pendingLoginAccount.clear();
         return false;
     }
 
-    // 只有发送成功后才登记等待响应的请求。服务器应在响应头中原样返回 requestId。
+    // 只跟踪成功交给 TcpClient 发送的请求，服务器响应时用 requestId 找回原请求类型。
     m_requestsAwaitingResponse.insert(request.requestId, request.command);
     return true;
 }
 
 void AppController::ensureServerConnection()
 {
-    // 已连接、正在连接或配置中没有服务器地址时，都不再发起新的连接。
     if (m_tcpClient->isConnected() || m_isConnecting || m_serverHost.isEmpty())
     {
         return;
     }
 
-    // 先标记为连接中，防止短时间内多次调用造成重复连接。
     m_isConnecting = true;
-
-    // 这是异步连接：函数会很快返回，连接成功/失败由相应信号通知控制器。
     m_tcpClient->connectToServer(m_serverHost, m_serverPort);
 }
 
 void AppController::onConnectedToServer()
 {
-    // 收到 connectedToServer 表示 TCP 连接已经建立。
     m_isConnecting = false;
-
-    // 把连接建立前暂存的登录/注册请求按先进先出顺序发出去。
     sendPendingRequests();
 }
 
 void AppController::onDisconnectedFromServer()
 {
-    // 连接断开后允许后续请求再次触发连接。
     m_isConnecting = false;
 
-    // 如果请求发出后连接突然断开，当前请求就无法得到响应。
-    // 清理状态，避免界面一直处于“请求处理中”而不能再次登录。
-    if (m_authRequestPending)
-    {
-        m_authRequestPending = false;
-        m_authRequestTimer.stop();
-        m_pendingRequests.clear();
-        m_requestsAwaitingResponse.clear();
+    const bool wasAuthenticationPending = m_authRequestPending;
+    const bool wasLoggingOut = m_isLoggingOut;
+    const bool wasAuthenticated = m_isAuthenticated;
 
+    clearPendingRequests();
+    m_pendingLoginAccount.clear();
+
+    if (wasAuthenticated || wasLoggingOut)
+    {
+        // 已登录期间连接断开，服务端连接会话也随之失效，客户端必须退回登录界面。
+        m_isAuthenticated = false;
+        m_currentAccount.clear();
+        returnToLoginWindow();
         showResponseMessage(
             QStringLiteral("连接已断开"),
-            QStringLiteral("与服务器的连接已断开，请检查网络后重试。"),
+            QStringLiteral("与服务器的连接已断开，已返回登录界面，请重新登录。"),
+            true);
+    }
+    else if (wasAuthenticationPending)
+    {
+        showResponseMessage(
+            QStringLiteral("连接已断开"),
+            QStringLiteral("请求完成前连接已断开，请检查网络后重试。"),
             true);
     }
 }
@@ -309,30 +309,39 @@ void AppController::onConnectionError(const QString &message)
 {
     m_isConnecting = false;
 
-    // 一旦收到连接错误，就结束当前认证尝试并清理队列。
-    // 某些 socket 错误发出时状态可能还短暂显示为 Connected，
-    // 因此这里不依赖 isConnected() 的瞬时值，避免请求一直卡在处理中。
-    m_pendingRequests.clear();
-    m_requestsAwaitingResponse.clear();
-    m_authRequestPending = false;
-    m_authRequestTimer.stop();
+    const bool hadSession = m_isAuthenticated || m_isLoggingOut;
+    const bool hadPendingRequest = m_authRequestPending || !m_pendingRequests.isEmpty();
 
-    showResponseMessage(
-        QStringLiteral("服务器连接失败"),
-        message + QStringLiteral("\n\n请检查 client.conf 中的 SERVER_HOST 和 SERVER_PORT，以及服务端是否已启动。"),
-        true);
+    clearPendingRequests();
+    m_pendingLoginAccount.clear();
+
+    if (hadSession)
+    {
+        m_isAuthenticated = false;
+        m_currentAccount.clear();
+        returnToLoginWindow();
+        m_tcpClient->abortConnection();
+        showResponseMessage(
+            QStringLiteral("连接已断开"),
+            message + QStringLiteral("\n\n客户端已返回登录界面，请重新登录。"),
+            true);
+    }
+    else if (hadPendingRequest)
+    {
+        showResponseMessage(
+            QStringLiteral("服务器连接失败"),
+            message + QStringLiteral("\n\n请检查 client.conf 中的 SERVER_HOST 和 SERVER_PORT，以及服务端是否已启动。"),
+            true);
+    }
 }
 
 void AppController::sendPendingRequests()
 {
-    // 只要仍然连接着服务器、队列中也还有请求，就继续逐个发送。
-    // 每次 dequeue 都会移除队首请求，保证不会被重复发送。
     while (m_tcpClient->isConnected() && !m_pendingRequests.isEmpty())
     {
         const PendingRequest request = m_pendingRequests.dequeue();
         if (!sendRequest(request))
         {
-            // 发送失败时停止继续发送，避免在连接异常时继续处理队列。
             break;
         }
     }
@@ -342,9 +351,7 @@ void AppController::onPacketReceived(quint16 command,
                                      quint64 requestId,
                                      const QByteArray &jsonBody)
 {
-    // 服务器响应头应带回原请求的 requestId。只有能找到对应请求时，
-    // 才把它当作本次登录/注册的响应处理。requestId 为 0 的主动推送，
-    // 会在后续聊天功能阶段单独处理；当前认证阶段先不消费这类消息。
+    // requestId == 0 等无对应请求的服务端主动推送暂留给后续聊天阶段处理。
     auto requestIt = m_requestsAwaitingResponse.find(requestId);
     if (requestIt == m_requestsAwaitingResponse.end())
     {
@@ -353,13 +360,59 @@ void AppController::onPacketReceived(quint16 command,
 
     const protocolHeader::CommandType originalCommand = requestIt.value();
     m_requestsAwaitingResponse.erase(requestIt);
-    m_authRequestPending = false;
-    m_authRequestTimer.stop();
 
-    // TcpClient 将协议头中的 command 以 quint16 传上来，这里转回枚举方便判断。
     const auto responseCommand = static_cast<protocolHeader::CommandType>(command);
 
-    // 验证响应是否属于对应请求，避免把错误类型的响应当成登录/注册结果。
+    const bool isMessageSendRequest =
+        originalCommand == protocolHeader::CommandType::GROUP_MESSAGE_SEND ||
+        originalCommand == protocolHeader::CommandType::PRIVATE_MESSAGE_SEND;
+    if (isMessageSendRequest)
+    {
+        stopMessageRequestTimer(requestId);
+
+        if (responseCommand != protocolHeader::CommandType::MESSAGE_SEND_SUCCESS &&
+            responseCommand != protocolHeader::CommandType::MESSAGE_SEND_FAILED)
+        {
+            if (m_mainWindow != nullptr)
+            {
+                m_mainWindow->setMessageStatus(
+                    QStringLiteral("服务器返回了无法识别的消息发送响应"), true);
+            }
+            return;
+        }
+
+        QJsonParseError messageParseError;
+        const QJsonDocument messageDocument =
+            QJsonDocument::fromJson(jsonBody, &messageParseError);
+        if (messageParseError.error != QJsonParseError::NoError || !messageDocument.isObject())
+        {
+            if (m_mainWindow != nullptr)
+            {
+                m_mainWindow->setMessageStatus(
+                    QStringLiteral("无法解析服务器的消息发送结果"), true);
+            }
+            return;
+        }
+
+        const QJsonObject messageBody = messageDocument.object();
+        const QString resultMessage = messageBody
+            .value(QString::fromLatin1(protocolBody::MESSAGE))
+            .toString(QStringLiteral("服务器已返回消息发送结果"));
+
+        if (m_mainWindow != nullptr)
+        {
+            if (responseCommand == protocolHeader::CommandType::MESSAGE_SEND_SUCCESS)
+            {
+                m_mainWindow->setMessageStatus(QStringLiteral("消息已保存到服务器"), false);
+            }
+            else
+            {
+                m_mainWindow->setMessageStatus(resultMessage, true);
+            }
+        }
+        return;
+    }
+
     const bool isLoginResponse =
         originalCommand == protocolHeader::CommandType::LOGIN_REQUEST &&
         (responseCommand == protocolHeader::CommandType::LOGIN_SUCCESS ||
@@ -368,9 +421,30 @@ void AppController::onPacketReceived(quint16 command,
         originalCommand == protocolHeader::CommandType::REGISTER_REQUEST &&
         (responseCommand == protocolHeader::CommandType::REGISTER_SUCCESS ||
          responseCommand == protocolHeader::CommandType::REGISTER_FAILED);
+    const bool isLogoutResponse =
+        originalCommand == protocolHeader::CommandType::LOGOUT_REQUEST &&
+        (responseCommand == protocolHeader::CommandType::LOGOUT_SUCCESS ||
+         responseCommand == protocolHeader::CommandType::LOGOUT_FAILED);
 
-    if (!isLoginResponse && !isRegisterResponse)
+    m_authRequestPending = false;
+    m_isLoggingOut = false;
+    m_requestTimer.stop();
+
+    if (!isLoginResponse && !isRegisterResponse && !isLogoutResponse)
     {
+        // 如果登录/退出登录请求收到意外响应，断开连接以避免服务端和客户端的登录状态不一致。
+        if (originalCommand == protocolHeader::CommandType::LOGIN_REQUEST ||
+            originalCommand == protocolHeader::CommandType::LOGOUT_REQUEST)
+        {
+            m_isAuthenticated = false;
+            m_currentAccount.clear();
+            returnToLoginWindow();
+            if (m_tcpClient->isConnected())
+            {
+                m_tcpClient->abortConnection();
+            }
+        }
+        m_pendingLoginAccount.clear();
         showResponseMessage(
             QStringLiteral("服务器响应异常"),
             QStringLiteral("收到的响应命令与当前请求不匹配，请检查客户端与服务端协议版本。"),
@@ -378,37 +452,50 @@ void AppController::onPacketReceived(quint16 command,
         return;
     }
 
-    // 先解析服务器返回的 JSON。若格式不正确，后续就不能安全读取字段。
     QJsonParseError parseError;
     const QJsonDocument document = QJsonDocument::fromJson(jsonBody, &parseError);
     if (parseError.error != QJsonParseError::NoError || !document.isObject())
     {
+        // 登录成功响应若无法解析，客户端不能确认当前身份；断开连接避免两端状态不一致。
+        if (originalCommand == protocolHeader::CommandType::LOGIN_REQUEST ||
+            originalCommand == protocolHeader::CommandType::LOGOUT_REQUEST)
+        {
+            m_isAuthenticated = false;
+            m_currentAccount.clear();
+            returnToLoginWindow();
+            if (m_tcpClient->isConnected())
+            {
+                m_tcpClient->abortConnection();
+            }
+        }
+        m_pendingLoginAccount.clear();
         showResponseMessage(
             QStringLiteral("服务器响应格式错误"),
-            QStringLiteral("无法解析服务器返回的 JSON。"), true);
+            QStringLiteral("无法解析服务器返回的 JSON。"),
+            true);
         return;
     }
 
     const QJsonObject body = document.object();
-
-    // 从响应 JSON 中读取 message 字段；如果服务器未提供，则显示默认提示。
     const QString message = body.value(QString::fromLatin1(protocolBody::MESSAGE))
                                 .toString(QStringLiteral("服务器已返回响应。"));
 
     switch (responseCommand)
     {
     case protocolHeader::CommandType::LOGIN_SUCCESS:
-        // 服务器明确返回登录成功后，才通知 LoginWindow 发出 loginSucceeded。
-        // 不要在用户点击登录时就切换窗口，因为服务器可能拒绝账号或密码。
+        // 只有服务器明确返回 LOGIN_SUCCESS，才设置本地登录状态并打开主窗口。
+        m_isAuthenticated = true;
+        m_currentAccount = m_pendingLoginAccount;
+        m_pendingLoginAccount.clear();
         m_loginWindow->notifyLoginSucceeded();
         break;
 
     case protocolHeader::CommandType::LOGIN_FAILED:
+        m_pendingLoginAccount.clear();
         showResponseMessage(QStringLiteral("登录失败"), message, true);
         break;
 
     case protocolHeader::CommandType::REGISTER_SUCCESS:
-        // 注册成功只提示用户，不自动登录；用户可以再回到登录页进行登录。
         showResponseMessage(QStringLiteral("注册成功"), message, false);
         break;
 
@@ -416,29 +503,224 @@ void AppController::onPacketReceived(quint16 command,
         showResponseMessage(QStringLiteral("注册失败"), message, true);
         break;
 
+    case protocolHeader::CommandType::LOGOUT_SUCCESS:
+        // 只有服务端确认退出成功，才清除会话并显示登录窗口。
+        m_isAuthenticated = false;
+        m_currentAccount.clear();
+        m_pendingLoginAccount.clear();
+        returnToLoginWindow();
+        showResponseMessage(QStringLiteral("退出登录成功"), message, false);
+        break;
+
+    case protocolHeader::CommandType::LOGOUT_FAILED:
+        // 服务器拒绝退出时，保留当前登录状态，用户仍可以在主界面继续操作。
+        showResponseMessage(QStringLiteral("退出登录失败"), message, true);
+        break;
+
     default:
-        // AppController 当前只处理登录/注册响应，聊天等其他命令留给后续业务控制器。
         break;
     }
 }
 
+void AppController::onMessageSendRequested(const QString &text,
+                                           quint64 conversationId,
+                                           bool isGroup)
+{
+    if (m_mainWindow == nullptr || !m_isAuthenticated)
+    {
+        if (m_mainWindow != nullptr)
+        {
+            m_mainWindow->setMessageStatus(QStringLiteral("请先登录后再发送消息"), true);
+        }
+        return;
+    }
+
+    // 断线后的登录状态会由连接事件清理；这里再做一次防御检查，避免向失效连接写数据。
+    if (!m_tcpClient->isConnected())
+    {
+        m_mainWindow->setMessageStatus(QStringLiteral("连接已断开，请重新登录"), true);
+        return;
+    }
+
+    // 演示会话使用字符串 ID，没有数据库 Conversation.id。
+    // conversationId 为 0 时不能猜测目标会话，因此不发送网络请求。
+    if (conversationId == 0)
+    {
+        m_mainWindow->setMessageStatus(
+            QStringLiteral("当前会话还是演示数据，尚未绑定真实会话 ID"), true);
+        return;
+    }
+
+    const QString content = text.trimmed();
+    const QByteArray utf8Content = content.toUtf8();
+    if (content.isEmpty())
+    {
+        return;
+    }
+
+    // 与服务端限制保持一致：最多 512 个 Unicode 字符，UTF-8 编码最多 2048 字节。
+    if (content.toUcs4().size() > 512 || utf8Content.size() > 2048)
+    {
+        m_mainWindow->setMessageStatus(
+            QStringLiteral("消息最多 512 个字符，且 UTF-8 编码不能超过 2048 字节"), true);
+        return;
+    }
+
+    QJsonObject body;
+    body.insert(QString::fromLatin1(protocolBody::CONTENT), content);
+    body.insert(QString::fromLatin1(protocolBody::CONVERSATION_ID),
+                QJsonValue(static_cast<qint64>(conversationId)));
+    body.insert(QString::fromLatin1(protocolBody::CLIENT_MSG_ID),
+                QUuid::createUuid().toString(QUuid::WithoutBraces));
+    body.insert(QString::fromLatin1(protocolBody::TYPE), 1); // 1 表示文本消息。
+
+    const quint64 requestId = m_nextRequestId++;
+    const auto command = isGroup
+        ? protocolHeader::CommandType::GROUP_MESSAGE_SEND
+        : protocolHeader::CommandType::PRIVATE_MESSAGE_SEND;
+    const PendingRequest request{command, requestId, body};
+
+    if (!sendRequest(request))
+    {
+        m_mainWindow->setMessageStatus(QStringLiteral("消息发送失败，请检查网络连接"), true);
+        return;
+    }
+
+    // 每条消息单独等待服务器确认，避免用户连续发送时超时互相影响。
+    auto *timer = new QTimer(this);
+    timer->setSingleShot(true);
+    connect(timer, &QTimer::timeout, this, [this, requestId]()
+    {
+        const bool wasWaiting = m_requestsAwaitingResponse.remove(requestId) > 0;
+        stopMessageRequestTimer(requestId);
+        if (wasWaiting && m_mainWindow != nullptr)
+        {
+            m_mainWindow->setMessageStatus(
+                QStringLiteral("消息发送超时，服务器没有返回确认"), true);
+        }
+    });
+    m_messageRequestTimers.insert(requestId, timer);
+    timer->start(15000);
+
+    // 只有本地 TCP 层接受了数据包，才把这条文本视作已提交发送。
+    m_mainWindow->clearMessageInput();
+    m_mainWindow->setMessageStatus(QStringLiteral("消息发送中…"), false);
+}
+
+void AppController::onLogoutRequested()
+{
+    if (!m_isAuthenticated)
+    {
+        showResponseMessage(QStringLiteral("当前未登录"),
+                            QStringLiteral("当前没有已登录的账号。"), false);
+        return;
+    }
+
+    if (m_isLoggingOut)
+    {
+        return;
+    }
+
+    // 退出登录依赖当前 TCP 连接中的服务端会话身份。若连接已断开，就不能只发送一个新连接请求。
+    if (!m_tcpClient->isConnected())
+    {
+        m_isAuthenticated = false;
+        m_currentAccount.clear();
+        returnToLoginWindow();
+        showResponseMessage(
+            QStringLiteral("连接已断开"),
+            QStringLiteral("当前连接已失效，客户端已返回登录界面，请重新登录。"),
+            true);
+        return;
+    }
+
+    m_isLoggingOut = true;
+    m_requestTimer.start(15000);
+
+    // 服务端从当前 TCP 连接绑定的 ClientSession 识别用户，因此退出请求无需携带密码或账号。
+    const PendingRequest request{
+        protocolHeader::CommandType::LOGOUT_REQUEST,
+        m_nextRequestId++,
+        QJsonObject{}};
+    sendRequest(request);
+}
+
 void AppController::onLoginSucceeded()
 {
-    // 如果主窗口尚未创建，就创建一次；重复收到信号也不会反复创建新窗口。
+    // LoginWindow 的信号只能在服务器确认登录后触发，仍然检查状态以保护窗口切换。
+    if (!m_isAuthenticated)
+    {
+        return;
+    }
+
     if (m_mainWindow == nullptr)
     {
         m_mainWindow = new MainWindow;
+        connect(m_mainWindow, &MainWindow::logoutRequested,
+                this, &AppController::onLogoutRequested);
+        connect(m_mainWindow, &MainWindow::messageSendRequested,
+                this, &AppController::onMessageSendRequested);
     }
 
-    // 显示并激活主窗口，确保它出现在前台。
     m_mainWindow->show();
     m_mainWindow->raise();
     m_mainWindow->activateWindow();
+    m_loginWindow->hide();
+}
 
-    // 登录成功后隐藏登录窗口而不是立刻销毁它，便于控制整个应用中的顶层窗口生命周期。
+void AppController::stopMessageRequestTimer(quint64 requestId)
+{
+    auto timerIt = m_messageRequestTimers.find(requestId);
+    if (timerIt == m_messageRequestTimers.end())
+    {
+        return;
+    }
+
+    QTimer *timer = timerIt.value();
+    m_messageRequestTimers.erase(timerIt);
+    timer->stop();
+    timer->deleteLater();
+}
+
+void AppController::clearMessageRequestTimers()
+{
+    const auto timers = m_messageRequestTimers;
+    m_messageRequestTimers.clear();
+    for (QTimer *timer : timers)
+    {
+        if (timer != nullptr)
+        {
+            timer->stop();
+            timer->deleteLater();
+        }
+    }
+}
+
+void AppController::clearPendingRequests()
+{
+    m_authRequestPending = false;
+    m_isLoggingOut = false;
+    m_requestTimer.stop();
+    clearMessageRequestTimers();
+    m_pendingRequests.clear();
+    m_requestsAwaitingResponse.clear();
+}
+
+void AppController::returnToLoginWindow()
+{
+    // 此方法不负责修改登录状态；调用者应先更新 m_isAuthenticated 和用户信息。
+    if (m_mainWindow != nullptr)
+    {
+        m_mainWindow->hide();
+    }
+
     if (m_loginWindow != nullptr)
     {
-        m_loginWindow->hide();
+        // 重新登录时回到简洁欢迎页，并恢复欢迎页原有尺寸。
+        m_loginWindow->resetToWelcomePage();
+        m_loginWindow->show();
+        m_loginWindow->raise();
+        m_loginWindow->activateWindow();
     }
 }
 
@@ -446,13 +728,12 @@ void AppController::showResponseMessage(const QString &title,
                                         const QString &message,
                                         bool isError)
 {
-    // 优先把消息框附着在当前可见的窗口上，避免消息框出现在不相关的窗口后面。
     QWidget *parentWidget = m_loginWindow;
     if (m_mainWindow != nullptr && m_mainWindow->isVisible())
     {
         parentWidget = m_mainWindow;
     }
 
-    // 使用自定义提示框，避免原生 QMessageBox 的系统边框破坏紫灰沉浸主题。
+    // 继续使用项目的紫灰主题提示框，不使用原生 QMessageBox。
     ModernMessageBox::showMessage(parentWidget, title, message, isError);
 }

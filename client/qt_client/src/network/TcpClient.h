@@ -20,8 +20,12 @@ public:
     // 连接服务器，连接过程是异步的
     void connectToServer(const QString &host, quint16 port);
 
-    // 请求断开连接
+    // 请求正常断开 TCP 连接；允许 Qt 尝试完成待发送数据。
     void disconnectFromServer();
+
+    // 立即中止当前连接并清空接收缓冲区。
+    // 用于响应超时或会话状态不确定的情况，避免复用可能已认证的旧连接。
+    void abortConnection();
 
     // 判断当前是否已经建立连接
     bool isConnected() const;

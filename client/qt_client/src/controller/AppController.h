@@ -11,115 +11,103 @@
 
 #include "protocol/ProtocolHeader.h"
 
-// 这里只做前置声明，不在头文件中引入完整窗口和网络类定义。
-// 这样能减少头文件之间的相互依赖，加快编译速度。
 class LoginWindow;
 class MainWindow;
 class TcpClient;
 
-// AppController 是客户端应用层的总协调者。
-// 它不负责绘制界面，也不自己实现 TCP 协议；它负责把界面操作、网络请求和业务结果连接起来。
+// AppController 负责协调登录状态、窗口生命周期和网络请求。
+// 窗口只负责显示界面并发出信号，TCP 细节则交由 TcpClient 处理。
 class AppController : public QObject
 {
     Q_OBJECT
 
 public:
-    // parent 默认为 nullptr。main.cpp 中通常在栈上创建 AppController。
     explicit AppController(QObject *parent = nullptr);
-
-    // 释放本控制器创建的顶层窗口。
-    // m_tcpClient 的 QObject 父对象是 this，会由 QObject 自动释放。
     ~AppController() override;
 
 private slots:
-    // LoginWindow 发出 loginRequested 时调用。
-    // account/password 来自登录表单，rememberMe 表示用户是否勾选“记住我”。
     void onLoginRequested(const QString &account,
                           const QString &password,
                           bool rememberMe);
-
-    // LoginWindow 发出 registerRequested 时调用。
     void onRegisterRequested(const QString &account,
                              const QString &password);
 
-    // 下面三个槽处理 TCP 连接状态变化。
     void onConnectedToServer();
     void onDisconnectedFromServer();
     void onConnectionError(const QString &message);
-
-    // 收到 TcpClient 解析好的完整数据包时调用。
-    // command 是服务端返回的命令类型，requestId 对应原请求编号，jsonBody 是 JSON 消息体。
     void onPacketReceived(quint16 command,
                           quint64 requestId,
                           const QByteArray &jsonBody);
 
-    // LoginWindow 发出 loginSucceeded 后调用，用于打开聊天主窗口。
+    // 主窗口通过侧边栏菜单发出退出登录请求。
+    void onLogoutRequested();
     void onLoginSucceeded();
 
+    // 当前已登录用户在选中的真实会话中发送一条文本消息。
+    void onMessageSendRequested(const QString &text, quint64 conversationId, bool isGroup);
+
 private:
-    // 保存一个尚待发送或可以立即发送的请求。
-    // TCP 连接是异步的：用户可能在连接完成前就点击登录，因此需要暂存请求。
+    // 一个请求在真正发送前需要保存命令、编号和 JSON 内容。
+    // 连接建立前的请求先进入队列，连接成功后再按顺序发送。
     struct PendingRequest
     {
-        protocolHeader::CommandType command; // 请求类型，例如 LOGIN_REQUEST。
-        quint64 requestId;                   // 请求编号；服务器回复时应返回相同编号。
-        QJsonObject body;                    // JSON 请求内容，例如 username/password。
+        protocolHeader::CommandType command;
+        quint64 requestId;
+        QJsonObject body;
     };
 
-    // 读取客户端自己的配置文件 client.conf，得到服务器地址与端口。
     bool loadClientConfig();
-
-    // 如果已经连接就直接发送；如果还没连接就先进入队列，连接成功后再发送。
     void queueOrSendRequest(protocolHeader::CommandType command,
                             const QJsonObject &body);
-
-    // 通过 TcpClient 真正发送一个请求。返回 false 表示发送失败。
     bool sendRequest(const PendingRequest &request);
-
-    // 按顺序发送连接成功前暂存的请求。
     void sendPendingRequests();
-
-    // 在尚未连接且当前没有正在连接时，发起异步连接。
     void ensureServerConnection();
 
-    // 统一显示错误或普通提示，避免原生对话框破坏紫灰沉浸主题。
+    // 清理本次尚未完成的网络请求状态，不会自行更改已登录用户。
+    void clearPendingRequests();
+
+    // 清除客户端当前的登录信息，并将界面恢复到登录窗口。
+    void returnToLoginWindow();
+
+    // 停止指定消息请求的超时计时器，或清理所有消息请求计时器。
+    void stopMessageRequestTimer(quint64 requestId);
+    void clearMessageRequestTimers();
+
+    // 统一显示紫灰主题提示框。
     void showResponseMessage(const QString &title,
                              const QString &message,
                              bool isError);
 
 private:
-    // 网络对象：真正管理 QTcpSocket、协议编码和数据收发。
-    // 将 this 作为父对象，AppController 销毁时 Qt 会自动销毁它。
     TcpClient *m_tcpClient = nullptr;
-
-    // 登录窗口和聊天窗口都是顶层窗口，因此不通过窗口父子关系管理生命周期。
-    // 这里保存指针，方便切换页面以及在控制器析构时释放。
     LoginWindow *m_loginWindow = nullptr;
     MainWindow *m_mainWindow = nullptr;
 
-    // 从 client.conf 读取的服务器配置。
     QString m_serverHost;
     quint16 m_serverPort = 0;
-
-    // 防止短时间内重复调用 connectToServer。
+    bool m_configurationValid = false;
     bool m_isConnecting = false;
 
-    // 下一个请求编号从 1 开始递增，便于将响应与请求对应起来。
     quint64 m_nextRequestId = 1;
-
-    // 在 TCP 连接建立之前，先把用户请求放在这里等待发送。
     QQueue<PendingRequest> m_pendingRequests;
-
-    // 记录已经发出、但尚未收到服务器响应的请求。
-    // key 是 requestId，value 是原始请求命令，用于验证响应是否对应当前请求。
     QHash<quint64, protocolHeader::CommandType> m_requestsAwaitingResponse;
 
-    // 防止用户在一次登录/注册请求得到结果之前重复提交。
+    // 认证请求处理中时禁止再次提交，避免快速双击产生多个登录/注册请求。
     bool m_authRequestPending = false;
 
-    // 防止服务器连接成功后却一直不返回响应，导致认证流程永久卡住。
-    QTimer m_authRequestTimer;
+    // 退出登录请求在等待服务器确认时为 true。
+    bool m_isLoggingOut = false;
 
-    // 启动时只读取配置，不主动连接；用户提交登录/注册时再建立 TCP 连接。
-    bool m_configurationValid = false;
+    // 当前是否已经通过服务器认证。不能只根据“点击过登录按钮”来判断。
+    bool m_isAuthenticated = false;
+
+    // 登录请求发出时暂存账号；只有收到 LOGIN_SUCCESS 才会把它记为当前账号。
+    QString m_pendingLoginAccount;
+    QString m_currentAccount;
+
+    // 登录、注册、退出登录都设置超时，避免界面一直停留在等待状态。
+    QTimer m_requestTimer;
+
+    // 消息可以连续发送，单独为每条消息计时，避免一个响应重置其他消息的超时。
+    QHash<quint64, QTimer *> m_messageRequestTimers;
 };

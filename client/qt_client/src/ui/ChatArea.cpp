@@ -179,3 +179,19 @@ InputBar *ChatArea::inputBar() const
     return m_inputBar;
 }
 
+void ChatArea::setMessageStatus(const QString &message, bool isError)
+{
+    if (m_inputBar != nullptr)
+    {
+        m_inputBar->setStatusMessage(message, isError);
+    }
+}
+
+void ChatArea::clearMessageInput()
+{
+    if (m_inputBar != nullptr)
+    {
+        m_inputBar->clearInput();
+    }
+}
+

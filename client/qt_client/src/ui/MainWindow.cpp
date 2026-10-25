@@ -83,12 +83,25 @@ QWidget *MainWindow::createChatWorkspacePage()
     auto *sideBar = new SideBar(splitter);
     sideBar->setFixedWidth(Theme::NavigationWidth);
 
+    // 主窗口不直接处理退出登录，只把事件转发给 AppController。
+    connect(sideBar, &SideBar::logoutRequested,
+            this, &MainWindow::logoutRequested);
+
     auto *sessionPanel = new SessionListPanel(splitter);
     // SessionListPanel 自己设置了 220–340px 的宽度范围；这里给它 240px 初始宽度。
     sessionPanel->resize(Theme::ConversationWidth, sessionPanel->height());
 
-    auto *chatArea = new ChatArea(splitter);
+    m_chatArea = new ChatArea(splitter);
+    ChatArea *chatArea = m_chatArea;
     chatArea->setConversationInfo(QStringLiteral("林间风"), QStringLiteral("林"), true);
+
+    // 输入区只发出“用户想发送什么”；网络请求由 AppController 统一处理。
+    connect(chatArea, &ChatArea::sendRequested, this,
+            [this](const QString &text)
+            {
+                emit messageSendRequested(
+                    text, m_currentConversationId, m_currentConversationIsGroup);
+            });
 
     splitter->addWidget(sideBar);
     splitter->addWidget(sessionPanel);
@@ -108,7 +121,7 @@ QWidget *MainWindow::createChatWorkspacePage()
     // 点击会话时，把会话模型里的名字和头像文字同步到聊天区 Header。
     // 这里仅联动演示数据，不代表已经连接服务器或加载了真实消息。
     connect(sessionPanel, &SessionListPanel::sessionActivated, this,
-            [sessionPanel, chatArea](const QString &sessionId)
+            [this, sessionPanel, chatArea](const QString &sessionId)
             {
                 const SessionListModel *model = sessionPanel->sessionModel();
                 for (int row = 0; row < model->rowCount(); ++row)
@@ -117,12 +130,39 @@ QWidget *MainWindow::createChatWorkspacePage()
                     if (session != nullptr && session->id == sessionId)
                     {
                         chatArea->setConversationInfo(session->name, session->avatarText, true);
+                        m_currentConversationId = session->conversationId;
+                        m_currentConversationIsGroup = session->group;
                         break;
                     }
                 }
             });
 
+    // 如果列表已有会话并默认选中了第一条，初始化其 ID/type；后续真实会话数据接入后无需额外点击。
+    if (const SessionItem *firstSession = sessionPanel->sessionModel()->sessionAt(0))
+    {
+        m_currentConversationId = firstSession->conversationId;
+        m_currentConversationIsGroup = firstSession->group;
+        chatArea->setConversationInfo(
+            firstSession->name, firstSession->avatarText, true);
+    }
+
     return page;
+}
+
+void MainWindow::setMessageStatus(const QString &message, bool isError)
+{
+    if (m_chatArea != nullptr)
+    {
+        m_chatArea->setMessageStatus(message, isError);
+    }
+}
+
+void MainWindow::clearMessageInput()
+{
+    if (m_chatArea != nullptr)
+    {
+        m_chatArea->clearMessageInput();
+    }
 }
 
 // 为当前页面及所有子控件安装过滤器，这样鼠标停在聊天区/会话列表上时，

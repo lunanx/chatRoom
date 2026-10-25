@@ -35,6 +35,9 @@ signals:
     // 用户点击消息、联系人、收藏或文件时发出，由主窗口负责切换右侧内容。
     void sectionChanged(int index);
 
+    // 从“更多”菜单选择退出登录时发出，由主窗口转发给 AppController。
+    void logoutRequested();
+
 private:
     // 创建一个统一尺寸的导航按钮，避免四个主导航和底部按钮样式不一致。
     QToolButton *createNavButton(const QString &text,

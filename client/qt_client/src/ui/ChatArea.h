@@ -27,6 +27,11 @@ public:
     QListView *messageListView() const;
     InputBar *inputBar() const;
 
+    // 将网络发送状态显示在输入区，不在聊天页面上弹模态窗口。
+    void setMessageStatus(const QString &message, bool isError = false);
+    // 控制器在 TCP 层接受发送请求后清空编辑框。
+    void clearMessageInput();
+
 signals:
     // 输入区发送文本时向外转发；后续由控制器连接并提交到网络层。
     void sendRequested(const QString &text);

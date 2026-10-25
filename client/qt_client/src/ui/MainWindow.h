@@ -4,6 +4,7 @@
 #include <QPoint>
 #include <QRect>
 #include <Qt>
+#include <QtGlobal>
 #include <QString>
 
 class QEvent;
@@ -12,6 +13,7 @@ class QPaintEvent;
 class QResizeEvent;
 class QStackedWidget;
 class QWidget;
+class ChatArea;
 
 // 客户端主窗口：展示三栏聊天工作台，并统一矩形窗口与窗口控制按钮。
 class MainWindow : public QMainWindow
@@ -20,6 +22,18 @@ class MainWindow : public QMainWindow
 
 public:
     explicit MainWindow(QWidget *parent = nullptr);
+
+    // 在输入区显示发送状态，例如服务器确认保存或返回失败原因。
+    void setMessageStatus(const QString &message, bool isError = false);
+    // TCP 层接受消息发送请求后，清空编辑框中的已发送文本。
+    void clearMessageInput();
+
+signals:
+    // 用户从侧边栏“更多”菜单中选择退出登录时发出。
+    void logoutRequested();
+
+    // 输入区请求发送文本；会话 ID 与类型来自当前选中的会话。
+    void messageSendRequested(const QString &text, quint64 conversationId, bool isGroup);
 
 protected:
     // 绘制铺满窗口的底色与紫色光晕。
@@ -51,4 +65,8 @@ private:
     Qt::Edges m_resizeEdges;          // 当前正在拖动的边缘/角。
     QPoint m_resizeStartGlobal;       // 缩放开始时的全局鼠标坐标。
     QRect m_resizeStartGeometry;      // 缩放开始时的窗口几何区域。
+
+    ChatArea *m_chatArea = nullptr;    // 当前聊天区，负责显示发送状态。
+    quint64 m_currentConversationId = 0; // 当前数据库会话 ID；演示数据使用 0。
+    bool m_currentConversationIsGroup = false; // 当前会话是否为群聊。
 };

@@ -11,6 +11,7 @@
 #include <QFrame>
 #include <QKeyEvent>
 #include <QEvent>
+#include <QStyle>
 #include <QStringList>
 #include <QDebug>
 
@@ -98,9 +99,15 @@ InputBar::InputBar(QWidget *parent)
     m_editor->installEventFilter(this);
     rootLayout->addWidget(m_editor, 1);
 
-    // 底部操作区右对齐发送按钮。
+    // 底部操作区包含轻量状态提示和右侧发送按钮。
+    // 发送结果显示在这里，不会每发一条消息就弹出模态对话框。
     auto *bottomRow = new QHBoxLayout();
     bottomRow->setContentsMargins(0, 0, 0, 0);
+
+    m_statusLabel = new QLabel(this);
+    m_statusLabel->setObjectName(QStringLiteral("messageSendStatus"));
+    m_statusLabel->hide();
+    bottomRow->addWidget(m_statusLabel);
     bottomRow->addStretch(1);
 
     m_sendButton = new QPushButton(QStringLiteral("发送  ↗"), this);
@@ -123,6 +130,22 @@ void InputBar::clearInput()
 QString InputBar::inputText() const
 {
     return m_editor->toPlainText();
+}
+
+void InputBar::setStatusMessage(const QString &message, bool isError)
+{
+    if (m_statusLabel == nullptr)
+    {
+        return;
+    }
+
+    m_statusLabel->setText(message);
+    m_statusLabel->setProperty("error", isError);
+
+    // 属性变化后重新应用 QSS，让错误状态切换为红色，但不改变控件尺寸。
+    m_statusLabel->style()->unpolish(m_statusLabel);
+    m_statusLabel->style()->polish(m_statusLabel);
+    m_statusLabel->setVisible(!message.isEmpty());
 }
 
 bool InputBar::eventFilter(QObject *watched, QEvent *event)
@@ -151,6 +174,7 @@ void InputBar::handleSendClicked()
         return;
     }
 
+    // 只有控制器确认请求已成功交给 TCP 层后才清空输入框。
+    // 如果当前会话没有真实 ID 或网络发送失败，保留用户草稿，避免内容丢失。
     emit sendRequested(text);
-    m_editor->clear();
 }

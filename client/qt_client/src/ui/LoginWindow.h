@@ -24,6 +24,9 @@ public slots:
     // 只有在登录业务确认成功后，外部才能调用这个函数。
     void notifyLoginSucceeded();
 
+    // 退出登录或连接失效后，恢复到初始欢迎页及 400×500 窗口尺寸。
+    void resetToWelcomePage();
+
 signals:
     // 向外转发登录和注册请求，方便后续接入 Controller。
     void loginRequested(const QString &account,

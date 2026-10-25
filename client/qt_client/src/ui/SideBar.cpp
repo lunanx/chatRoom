@@ -1,10 +1,16 @@
 #include "SideBar.h"
 
 #include <QAbstractButton>
+#include <QAction>
 #include <QButtonGroup>
 #include <QFile>
 #include <QLabel>
+#include <QMenu>
+#include <QPoint>
 #include <QToolButton>
+#include <QPushButton>
+#include <QWidgetAction>
+#include <QHBoxLayout>
 #include <QVBoxLayout>
 #include <QWidget>
 #include <QStyle>
@@ -131,6 +137,59 @@ SideBar::SideBar(QWidget *parent)
                                        bottomWidget);
     bottomLayout->addWidget(settingsButton, 0, Qt::AlignHCenter);
     bottomLayout->addWidget(moreButton, 0, Qt::AlignHCenter);
+
+    // 将退出登录入口放在“更多”菜单中，不额外占用侧边栏空间。
+    auto *moreMenu = new QMenu(moreButton);
+    moreMenu->setObjectName(QStringLiteral("moreMenu"));
+    // 弹出菜单是独立的顶层弹出窗口；明确将侧边栏 QSS 应用到菜单，
+    // 这样菜单项和内部按钮不依赖平台默认菜单样式。
+    QFile menuStyleFile(QStringLiteral(":/styles/SideBar.qss"));
+    if (menuStyleFile.open(QIODevice::ReadOnly | QIODevice::Text))
+    {
+        moreMenu->setStyleSheet(QString::fromUtf8(menuStyleFile.readAll()));
+    }
+    else
+    {
+        qWarning() << "无法为更多菜单加载 QSS：:/styles/SideBar.qss";
+    }
+
+    auto *logoutAction = new QWidgetAction(moreMenu);
+    auto *logoutContainer = new QWidget;
+    logoutContainer->setObjectName(QStringLiteral("logoutMenuContainer"));
+    // 容器与按钮使用完全相同的尺寸，避免菜单项外层多出一圈直角区域。
+    logoutContainer->setFixedSize(108, 34);
+    auto *logoutLayout = new QHBoxLayout(logoutContainer);
+    logoutLayout->setContentsMargins(0, 0, 0, 0);
+    logoutLayout->setSpacing(0);
+
+    auto *logoutButton = new QPushButton(QStringLiteral("退出登录"), logoutContainer);
+    logoutButton->setObjectName(QStringLiteral("logoutMenuButton"));
+    logoutButton->setFixedSize(108, 34);
+    logoutButton->setCursor(Qt::PointingHandCursor);
+    logoutButton->setFocusPolicy(Qt::NoFocus);
+    // 按钮的颜色、圆角和各状态统一放在 SideBar.qss 中管理。
+    // 此处只设置几何尺寸；默认、悬停和按下时的尺寸完全相同。
+    logoutLayout->addWidget(logoutButton);
+    logoutAction->setDefaultWidget(logoutContainer);
+    moreMenu->addAction(logoutAction);
+
+    connect(logoutButton, &QPushButton::clicked,
+            this, [this, moreMenu]()
+    {
+        // 先关闭菜单，再发出退出登录信号，避免菜单遮挡后续提示框。
+        moreMenu->hide();
+        emit logoutRequested();
+    });
+    connect(moreButton, &QToolButton::clicked,
+            this, [moreButton, moreMenu]()
+    {
+        const QPoint buttonTopLeft = moreButton->mapToGlobal(QPoint(0, 0));
+        // 菜单弹到导航栏右侧，避免被 56px 宽的导航栏遮挡。
+        const QPoint menuPosition(
+            buttonTopLeft.x() + moreButton->width() + 8,
+            buttonTopLeft.y() + moreButton->height() - moreMenu->sizeHint().height());
+        moreMenu->exec(menuPosition);
+    });
 
     // 当前先用“我”作为头像占位；后续可以用 QLabel::setPixmap() 设置真实头像。
     m_userAvatar = new QLabel(QStringLiteral("我"), bottomWidget);

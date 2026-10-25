@@ -19,7 +19,6 @@
 #include <QApplication>
 #include <QStyle>
 #include <QStyleOptionViewItem>
-#include <algorithm>
 
 // ---------------------------- SessionListModel ----------------------------
 

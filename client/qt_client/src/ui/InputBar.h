@@ -22,6 +22,9 @@ public:
     // 返回当前编辑框中的文本。
     QString inputText() const;
 
+    // 在输入区显示发送状态，例如“发送中”或服务器返回的失败原因。
+    void setStatusMessage(const QString &message, bool isError = false);
+
 signals:
     // 点击“发送”后发出；聊天区域或控制器可以连接此信号处理消息。
     void sendRequested(const QString &text);
@@ -37,4 +40,5 @@ protected:
 private:
     QTextEdit *m_editor = nullptr;       // 多行消息编辑框。
     QPushButton *m_sendButton = nullptr; // 渐变发送按钮。
+    QLabel *m_statusLabel = nullptr;     // 显示网络发送状态，不打断用户输入。
 };

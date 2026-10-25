@@ -68,6 +68,13 @@ void LoginWindow::notifyLoginSucceeded()
     emit loginSucceeded();
 }
 
+// 清除登录流程的页面位置，下一次重新登录时从欢迎页开始。
+void LoginWindow::resetToWelcomePage()
+{
+    m_pageStack->setCurrentWidget(m_welcomePage);
+    resize(400, 500);
+}
+
 // 无系统标题栏后，允许从页面背景区域拖动窗口。
 bool LoginWindow::eventFilter(QObject *watched, QEvent *event)
 {

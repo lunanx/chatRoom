@@ -73,6 +73,16 @@ void TcpClient::disconnectFromServer()
     }
 }
 
+// 立即终止连接。和 disconnectFromHost() 不同，abort() 不会继续等待待发送数据。
+void TcpClient::abortConnection()
+{
+    m_receiveBuffer.clear();
+    if (m_socket->state() != QAbstractSocket::UnconnectedState)
+    {
+        m_socket->abort();
+    }
+}
+
 // 判断连接状态
 bool TcpClient::isConnected() const
 {
