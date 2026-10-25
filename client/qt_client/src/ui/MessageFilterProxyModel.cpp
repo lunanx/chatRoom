@@ -26,7 +26,7 @@ quint64 MessageFilterProxyModel::conversationId() const
 
 bool MessageFilterProxyModel::filterAcceptsRow(int sourceRow, const QModelIndex &sourceParent) const
 {
-    // 0 是演示会话占位 ID，不代表数据库中的真实会话，因此不显示网络消息。
+    // 0 代表尚未选中有效会话，因此不显示任何网络消息。
     if (m_conversationId == 0 || sourceModel() == nullptr)
     {
         return false;

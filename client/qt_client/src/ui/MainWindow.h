@@ -6,6 +6,8 @@
 #include <Qt>
 #include <QtGlobal>
 #include <QString>
+#include <QVector>
+#include "ui/SessionListPanel.h"
 
 class QEvent;
 class QMouseEvent;
@@ -35,10 +37,14 @@ public:
     // 退出登录、断线或会话状态失效时清理消息内存。
     void clearMessages();
     void setHistoryLoading(quint64 conversationId, bool loading, bool hasMore = true);
+    // 用服务端返回的数据替换左侧会话列表；preferredConversationId 用于新建会话后自动打开它。
+    void setSessions(const QVector<SessionItem> &sessions, quint64 preferredConversationId = 0);
+    void clearSessions();
 
 signals:
     // 用户从侧边栏“更多”菜单中选择退出登录时发出。
     void logoutRequested();
+    void newSessionRequested();
 
     // 输入区请求发送文本；会话 ID 与类型来自当前选中的会话。
     void messageSendRequested(const QString &text, quint64 conversationId, bool isGroup);
@@ -76,6 +82,7 @@ private:
     QRect m_resizeStartGeometry;      // 缩放开始时的窗口几何区域。
 
     ChatArea *m_chatArea = nullptr;    // 当前聊天区，负责显示发送状态。
-    quint64 m_currentConversationId = 0; // 当前数据库会话 ID；演示数据使用 0。
+    SessionListPanel *m_sessionPanel = nullptr; // 中间栏的真实会话列表。
+    quint64 m_currentConversationId = 0; // 当前数据库会话 ID；0 表示尚未选中真实会话。
     bool m_currentConversationIsGroup = false; // 当前会话是否为群聊。
 };
