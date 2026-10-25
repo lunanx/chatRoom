@@ -45,12 +45,6 @@ struct ConversationListEntry
     std::string lastTime;
 };
 
-enum class CreateConversationResult
-{
-    Created,
-    Failed
-};
-
 class ConversationRepository
 {
 public:
