@@ -145,6 +145,18 @@ ChatArea::ChatArea(QWidget *parent)
 
     connect(m_inputBar, &InputBar::sendRequested,
             this, &ChatArea::sendRequested);
+    // 历史按钮放在输入区工具栏，但仍由 ChatArea 决定当前会话并向控制器发请求。
+    connect(m_inputBar, &InputBar::historyRequested, this, [this]()
+    {
+        if (m_currentConversationId != 0)
+        {
+            emit historyRequested(m_currentConversationId);
+        }
+        else
+        {
+            setMessageStatus(QStringLiteral("当前是演示会话，尚未绑定真实会话 ID"), true);
+        }
+    });
 }
 
 void ChatArea::setConversationInfo(const QString &name,
@@ -219,6 +231,12 @@ void ChatArea::setCurrentConversationId(quint64 conversationId)
     m_currentConversationId = conversationId;
     m_messageFilterModel->setConversationId(conversationId);
 
+    // 切换会话时恢复历史按钮状态；ID 为 0 的演示会话不可查询历史消息。
+    if (m_inputBar != nullptr)
+    {
+        m_inputBar->setHistoryLoading(false, true, conversationId != 0);
+    }
+
     // 会话切换后定位到最新一条消息；首次切换或空会话时不会访问无效索引。
     QTimer::singleShot(0, this, [this]()
     {
@@ -244,6 +262,7 @@ void ChatArea::clearMessages()
     {
         m_messageModel->clearMessages();
     }
+    setHistoryLoading(false, true);
 }
 
 bool ChatArea::appendMessage(const ChatMessageRecord &message)
@@ -264,4 +283,13 @@ bool ChatArea::appendMessage(const ChatMessageRecord &message)
         });
     }
     return inserted;
+}
+
+
+void ChatArea::setHistoryLoading(bool loading, bool hasMore)
+{
+    if (m_inputBar != nullptr)
+    {
+        m_inputBar->setHistoryLoading(loading, hasMore, m_currentConversationId != 0);
+    }
 }

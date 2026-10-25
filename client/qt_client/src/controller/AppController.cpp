@@ -11,6 +11,7 @@
 #include <QDateTime>
 #include <QDebug>
 #include <QJsonDocument>
+#include <QJsonArray>
 #include <QJsonObject>
 #include <QJsonValue>
 #include <QSettings>
@@ -380,6 +381,13 @@ void AppController::onPacketReceived(quint16 command,
                                      const QByteArray &jsonBody)
 {
     const auto receivedCommand = static_cast<protocolHeader::CommandType>(command);
+
+    // 历史消息是普通 request/response，但有独立分页状态，不能进入登录响应分支。
+    if (m_historyRequests.contains(requestId))
+    {
+        handleHistoryResponse(requestId, receivedCommand, jsonBody);
+        return;
+    }
 
     // 当前服务器主动推送消息时固定使用 request_id=0。
     // 必须先识别推送，再查找请求表；否则这类消息会被误当成“未知响应”直接丢弃。
@@ -766,6 +774,212 @@ void AppController::handleIncomingMessagePush(protocolHeader::CommandType comman
     Q_UNUSED(command); // 私聊/群聊命令只用来区分协议事件，气泡样式不依赖会话类型。
 }
 
+void AppController::onHistoryRequested(quint64 conversationId)
+{
+    if (!m_isAuthenticated || m_isLoggingOut || m_mainWindow == nullptr)
+    {
+        return;
+    }
+    if (conversationId == 0)
+    {
+        m_mainWindow->setMessageStatus(QStringLiteral("当前会话尚未绑定数据库 Conversation.id"), true);
+        return;
+    }
+    if (m_historyLoadingConversations.contains(conversationId))
+    {
+        return; // 同一会话只允许一个历史页请求在途，防止重复点击造成分页竞态。
+    }
+    if (m_historyExhaustedConversations.contains(conversationId))
+    {
+        m_mainWindow->setHistoryLoading(conversationId, false, false);
+        return;
+    }
+
+    const quint64 cursor = m_historyCursors.value(conversationId, 0);
+    QJsonObject body;
+    body.insert(QString::fromLatin1(protocolBody::CONVERSATION_ID),
+                static_cast<qint64>(conversationId));
+    body.insert(QString::fromLatin1(protocolBody::SEQ), static_cast<qint64>(cursor));
+
+    const quint64 requestId = m_nextRequestId++;
+    m_historyRequests.insert(requestId, conversationId);
+    m_historyLoadingConversations.insert(conversationId);
+    m_mainWindow->setHistoryLoading(conversationId, true, true);
+
+    // 历史查询也必须有超时；网络异常时不能让按钮永久停留在“正在加载”。
+    auto *historyTimer = new QTimer(this);
+    historyTimer->setSingleShot(true);
+    m_historyRequestTimers.insert(requestId, historyTimer);
+    connect(historyTimer, &QTimer::timeout, this, [this, requestId, conversationId]()
+    {
+        m_historyRequests.remove(requestId);
+        m_requestsAwaitingResponse.remove(requestId);
+        m_historyRequestTimers.remove(requestId);
+        m_historyLoadingConversations.remove(conversationId);
+        if (auto *timer = qobject_cast<QTimer *>(sender()))
+        {
+            timer->deleteLater();
+        }
+        if (m_mainWindow != nullptr)
+        {
+            m_mainWindow->setHistoryLoading(conversationId, false, true);
+            m_mainWindow->setMessageStatus(QStringLiteral("历史消息请求超时，请重试"), true);
+        }
+    });
+    historyTimer->start(15000);
+
+    const PendingRequest request{protocolHeader::CommandType::MESSAGE_HISTORY_REQUEST,
+                                 requestId, body};
+    if (!m_tcpClient->isConnected())
+    {
+        m_historyRequests.remove(requestId);
+        m_historyLoadingConversations.remove(conversationId);
+        if (auto *timer = m_historyRequestTimers.take(requestId)) { timer->stop(); timer->deleteLater(); }
+        m_mainWindow->setHistoryLoading(conversationId, false, true);
+        m_mainWindow->setMessageStatus(QStringLiteral("连接已断开，请重新登录后加载历史消息"), true);
+        return;
+    }
+    if (!sendRequest(request))
+    {
+        m_historyRequests.remove(requestId);
+        m_historyLoadingConversations.remove(conversationId);
+        if (auto *timer = m_historyRequestTimers.take(requestId)) { timer->stop(); timer->deleteLater(); }
+        m_mainWindow->setHistoryLoading(conversationId, false, true);
+        m_mainWindow->setMessageStatus(QStringLiteral("历史消息请求发送失败"), true);
+    }
+}
+
+void AppController::handleHistoryResponse(quint64 requestId,
+                                          protocolHeader::CommandType responseCommand,
+                                          const QByteArray &jsonBody)
+{
+    const quint64 conversationId = m_historyRequests.take(requestId);
+    m_requestsAwaitingResponse.remove(requestId);
+    m_historyLoadingConversations.remove(conversationId);
+    if (auto *timer = m_historyRequestTimers.take(requestId))
+    {
+        timer->stop();
+        timer->deleteLater();
+    }
+
+    if (m_mainWindow == nullptr)
+    {
+        return;
+    }
+
+    if (responseCommand != protocolHeader::CommandType::MESSAGE_HISTORY_SUCCESS &&
+        responseCommand != protocolHeader::CommandType::MESSAGE_HISTORY_FAILED)
+    {
+        m_mainWindow->setHistoryLoading(conversationId, false, true);
+        m_mainWindow->setMessageStatus(QStringLiteral("服务器返回了无法识别的历史消息响应"), true);
+        return;
+    }
+
+    QJsonParseError parseError;
+    const QJsonDocument document = QJsonDocument::fromJson(jsonBody, &parseError);
+    if (parseError.error != QJsonParseError::NoError || !document.isObject())
+    {
+        m_mainWindow->setHistoryLoading(conversationId, false, true);
+        m_mainWindow->setMessageStatus(QStringLiteral("无法解析服务器返回的历史消息"), true);
+        return;
+    }
+
+    const QJsonObject body = document.object();
+    const QString serverMessage = body.value(QString::fromLatin1(protocolBody::MESSAGE))
+                                      .toString(QStringLiteral("历史消息查询完成"));
+    if (responseCommand == protocolHeader::CommandType::MESSAGE_HISTORY_FAILED)
+    {
+        m_mainWindow->setHistoryLoading(conversationId, false, true);
+        m_mainWindow->setMessageStatus(serverMessage, true);
+        return;
+    }
+
+    const QJsonValue contentValue = body.value(QString::fromLatin1(protocolBody::CONTENT));
+    const QJsonValue cursorValue = body.value(QString::fromLatin1(protocolBody::NEXT_CURSOR));
+    if (!contentValue.isArray() || !cursorValue.isDouble())
+    {
+        m_mainWindow->setHistoryLoading(conversationId, false, true);
+        m_mainWindow->setMessageStatus(QStringLiteral("历史消息响应缺少 content 或 next_cursor"), true);
+        return;
+    }
+
+    quint64 nextCursor = 0;
+    const qint64 cursorNumber = cursorValue.toInteger(-1);
+    if (cursorNumber < 0)
+    {
+        m_mainWindow->setHistoryLoading(conversationId, false, true);
+        m_mainWindow->setMessageStatus(QStringLiteral("历史消息分页游标无效"), true);
+        return;
+    }
+    nextCursor = static_cast<quint64>(cursorNumber);
+
+    int insertedCount = 0;
+    quint64 smallestSequence = 0;
+    const QJsonArray items = contentValue.toArray();
+    for (const QJsonValue &itemValue : items)
+    {
+        if (!itemValue.isObject())
+        {
+            continue;
+        }
+        const QJsonObject item = itemValue.toObject();
+        ChatMessageRecord message;
+        message.conversationId = conversationId;
+        if (!readPositiveJsonInteger(item, protocolBody::SEQ, message.sequence) ||
+            !readPositiveJsonInteger(item, protocolBody::USER_ID, message.senderId) ||
+            !item.value(QString::fromLatin1(protocolBody::USERNAME)).isString() ||
+            !item.value(QString::fromLatin1(protocolBody::TEXT)).isString())
+        {
+            qWarning() << "跳过字段不完整的历史消息";
+            continue;
+        }
+        message.senderName = item.value(QString::fromLatin1(protocolBody::USERNAME)).toString();
+        message.content = item.value(QString::fromLatin1(protocolBody::TEXT)).toString();
+        if (message.content.isEmpty() || message.content.toUcs4().size() > 512 ||
+            message.content.toUtf8().size() > 2048 || message.senderName.trimmed().isEmpty())
+        {
+            continue;
+        }
+        message.timeText = QStringLiteral("历史消息");
+        // 当前历史接口只返回 seq/user_id/username/text，没有 server_msg_id 与时间戳。
+        // 模型用 conversation_id + seq 去重，后续可在不破坏协议兼容性的情况下补充字段。
+        if (smallestSequence == 0 || message.sequence < smallestSequence)
+        {
+            smallestSequence = message.sequence;
+        }
+        if (m_mainWindow->appendMessage(message))
+        {
+            ++insertedCount;
+        }
+    }
+
+    if (nextCursor == 0 || items.isEmpty() || smallestSequence == 0)
+    {
+        m_historyExhaustedConversations.insert(conversationId);
+    }
+    else
+    {
+        // 服务端 next_cursor 是当前页最早消息的 seq；下一次查询严格小于该值。
+        // 如果服务端游标没有前进，停止继续请求，防止异常响应造成死循环。
+        const quint64 oldCursor = m_historyCursors.value(conversationId, 0);
+        if (oldCursor != 0 && nextCursor >= oldCursor)
+        {
+            m_historyExhaustedConversations.insert(conversationId);
+        }
+        else
+        {
+            m_historyCursors.insert(conversationId, nextCursor);
+        }
+    }
+
+    const bool hasMore = !m_historyExhaustedConversations.contains(conversationId);
+    m_mainWindow->setHistoryLoading(conversationId, false, hasMore);
+    m_mainWindow->setMessageStatus(
+        insertedCount > 0 ? QStringLiteral("已加载 %1 条历史消息").arg(insertedCount)
+                          : (hasMore ? QStringLiteral("没有新增历史消息") : QStringLiteral("历史消息已加载完毕")),
+        false);
+}
+
 void AppController::onLoginSucceeded()
 {
     // LoginWindow 的信号只能在服务器确认登录后触发，仍然检查状态以保护窗口切换。
@@ -779,6 +993,8 @@ void AppController::onLoginSucceeded()
         m_mainWindow = new MainWindow;
         connect(m_mainWindow, &MainWindow::logoutRequested,
                 this, &AppController::onLogoutRequested);
+        connect(m_mainWindow, &MainWindow::historyRequested,
+                this, &AppController::onHistoryRequested);
         connect(m_mainWindow, &MainWindow::messageSendRequested,
                 this, &AppController::onMessageSendRequested);
     }
@@ -830,6 +1046,23 @@ void AppController::clearPendingRequests()
 
 void AppController::returnToLoginWindow()
 {
+    for (auto it = m_historyRequests.cbegin(); it != m_historyRequests.cend(); ++it)
+    {
+        m_requestsAwaitingResponse.remove(it.key());
+    }
+    m_historyRequests.clear();
+    for (auto *timer : m_historyRequestTimers)
+    {
+        if (timer != nullptr)
+        {
+            timer->stop();
+            timer->deleteLater();
+        }
+    }
+    m_historyRequestTimers.clear();
+    m_historyCursors.clear();
+    m_historyLoadingConversations.clear();
+    m_historyExhaustedConversations.clear();
     // 此方法不负责修改登录状态；调用者应先更新 m_isAuthenticated 和用户信息。
     if (m_mainWindow != nullptr)
     {

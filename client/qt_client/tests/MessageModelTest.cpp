@@ -100,10 +100,26 @@ int main(int argc, char *argv[])
         return 1;
     }
 
+    // 历史查询接口当前没有返回 server_msg_id；同会话 seq 应作为历史/实时合并的去重键。
+    if (!require(model.appendMessage(makeMessage(
+                      501, 0, QString(), 8, QStringLiteral("bob"), 2,
+                      QStringLiteral("来自历史接口的消息"))),
+                  "historical message without server id should be accepted"))
+    {
+        return 1;
+    }
+    if (!require(!model.appendMessage(makeMessage(
+                      501, 1009, QStringLiteral("live-copy"), 8, QStringLiteral("bob"), 2,
+                      QStringLiteral("同一条消息的实时推送"))),
+                  "history and live push with same conversation seq must deduplicate"))
+    {
+        return 1;
+    }
+
     MessageFilterProxyModel proxy;
     proxy.setSourceModel(&model);
     proxy.setConversationId(501);
-    if (!require(proxy.rowCount() == 2, "proxy should show only selected conversation"))
+    if (!require(proxy.rowCount() == 3, "proxy should show only selected conversation"))
     {
         return 1;
     }
@@ -115,7 +131,7 @@ int main(int argc, char *argv[])
     {
         return 1;
     }
-    if (!require(proxy.rowCount() == 2, "another conversation must not leak into current view"))
+    if (!require(proxy.rowCount() == 3, "another conversation must not leak into current view"))
     {
         return 1;
     }

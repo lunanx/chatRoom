@@ -34,6 +34,7 @@ public:
     bool appendMessage(const ChatMessageRecord &message);
     // 退出登录、断线或会话状态失效时清理消息内存。
     void clearMessages();
+    void setHistoryLoading(quint64 conversationId, bool loading, bool hasMore = true);
 
 signals:
     // 用户从侧边栏“更多”菜单中选择退出登录时发出。
@@ -41,6 +42,7 @@ signals:
 
     // 输入区请求发送文本；会话 ID 与类型来自当前选中的会话。
     void messageSendRequested(const QString &text, quint64 conversationId, bool isGroup);
+    void historyRequested(quint64 conversationId);
 
 protected:
     // 绘制铺满窗口的底色与紫色光晕。

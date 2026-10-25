@@ -103,6 +103,8 @@ QWidget *MainWindow::createChatWorkspacePage()
                 emit messageSendRequested(
                     text, m_currentConversationId, m_currentConversationIsGroup);
             });
+    connect(chatArea, &ChatArea::historyRequested,
+            this, &MainWindow::historyRequested);
 
     splitter->addWidget(sideBar);
     splitter->addWidget(sessionPanel);
@@ -498,4 +500,13 @@ bool MainWindow::eventFilter(QObject *watched, QEvent *event)
     }
 
     return QMainWindow::eventFilter(watched, event);
+}
+
+
+void MainWindow::setHistoryLoading(quint64 conversationId, bool loading, bool hasMore)
+{
+    if (conversationId == m_currentConversationId && m_chatArea != nullptr)
+    {
+        m_chatArea->setHistoryLoading(loading, hasMore);
+    }
 }

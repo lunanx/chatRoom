@@ -68,4 +68,3 @@ QListView#messageListView QScrollBar::add-page:vertical,
 QListView#messageListView QScrollBar::sub-page:vertical {
     background: transparent;
 }
-

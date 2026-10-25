@@ -46,10 +46,12 @@ public:
     bool appendMessage(const ChatMessageRecord &message);
     // 清除上一登录会话的内存消息。
     void clearMessages();
+    void setHistoryLoading(bool loading, bool hasMore = true);
 
 signals:
     // 输入区发送文本时向外转发；后续由控制器连接并提交到网络层。
     void sendRequested(const QString &text);
+    void historyRequested(quint64 conversationId);
 
 protected:
     // 窗口尺寸变化时，更新输入区允许的最大高度，确保它不超过消息区。

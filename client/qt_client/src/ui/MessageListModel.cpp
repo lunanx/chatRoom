@@ -82,7 +82,7 @@ void MessageListModel::setCurrentUsername(const QString &username)
 
 bool MessageListModel::appendMessage(const ChatMessageRecord &message)
 {
-    if (message.conversationId == 0 || message.serverMessageId == 0 ||
+    if (message.conversationId == 0 ||
         message.senderId == 0 || message.sequence == 0 ||
         message.senderName.isEmpty() || message.content.isEmpty())
     {
@@ -132,7 +132,15 @@ bool MessageListModel::containsMessage(const ChatMessageRecord &message) const
     for (const ChatMessageRecord &existing : m_messages)
     {
         // 正常情况下 server_msg_id 足以识别一条已保存消息。
-        if (existing.serverMessageId == message.serverMessageId)
+        if (message.serverMessageId != 0 &&
+            existing.serverMessageId == message.serverMessageId)
+        {
+            return true;
+        }
+
+        // 历史消息接口没有返回 server_msg_id，使用同一会话的 seq 做稳定去重。
+        if (existing.conversationId == message.conversationId &&
+            existing.sequence == message.sequence)
         {
             return true;
         }

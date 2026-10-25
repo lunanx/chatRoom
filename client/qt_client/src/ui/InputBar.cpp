@@ -11,9 +11,11 @@
 #include <QFrame>
 #include <QKeyEvent>
 #include <QEvent>
-#include <QStyle>
 #include <QStringList>
 #include <QDebug>
+#include <QColor>
+#include <QPalette>
+#include <QStyle>
 
 namespace
 {
@@ -84,30 +86,41 @@ InputBar::InputBar(QWidget *parent)
     }
 
     toolbarLayout->addStretch(1);
-    auto *shortcutHint = new QLabel(QStringLiteral("Enter 发送 · Shift + Enter 换行"), toolbar);
-    shortcutHint->setObjectName(QStringLiteral("inputShortcutHint"));
-    toolbarLayout->addWidget(shortcutHint);
+
+    // 历史按钮替代原先工具栏右侧的快捷键提示；快捷键提示会显示在编辑框内部。
+    m_historyButton = new QPushButton(QStringLiteral("加载历史消息"), toolbar);
+    m_historyButton->setObjectName(QStringLiteral("loadHistoryButton"));
+    m_historyButton->setCursor(Qt::PointingHandCursor);
+    m_historyButton->setFixedHeight(28);
+    m_historyButton->setFocusPolicy(Qt::NoFocus);
+    m_historyButton->setEnabled(false); // 尚未绑定真实会话 ID 前不可请求历史消息。
+    toolbarLayout->addWidget(m_historyButton);
     rootLayout->addWidget(toolbar);
+
+    // 有内容时自动隐藏 placeholder；提示文字不属于编辑器内容，不会被发送。
+    m_statusLabel = new QLabel(this);
+    m_statusLabel->setObjectName(QStringLiteral("inputStatusLabel"));
+    m_statusLabel->setWordWrap(true);
+    m_statusLabel->hide();
+    rootLayout->addWidget(m_statusLabel);
 
     // 编辑框不显示原生边框，外观由父级 InputBar.qss 统一控制。
     m_editor = new QTextEdit(this);
     m_editor->setObjectName(QStringLiteral("messageEditor"));
     m_editor->setFrameShape(QFrame::NoFrame);
     m_editor->setAcceptRichText(false);
-    m_editor->setPlaceholderText(QStringLiteral("输入消息…"));
+    m_editor->setPlaceholderText(QStringLiteral("Enter 发送 · Shift + Enter 换行"));
+    // 比正文更淡，作为轻量操作提示；输入内容后 Qt 会自动隐藏它。
+    QPalette editorPalette = m_editor->palette();
+    editorPalette.setColor(QPalette::PlaceholderText, QColor(QStringLiteral("#B9B2C9")));
+    m_editor->setPalette(editorPalette);
     m_editor->setTabChangesFocus(false);
     m_editor->installEventFilter(this);
     rootLayout->addWidget(m_editor, 1);
 
-    // 底部操作区包含轻量状态提示和右侧发送按钮。
-    // 发送结果显示在这里，不会每发一条消息就弹出模态对话框。
+    // 底部操作区右对齐发送按钮。
     auto *bottomRow = new QHBoxLayout();
     bottomRow->setContentsMargins(0, 0, 0, 0);
-
-    m_statusLabel = new QLabel(this);
-    m_statusLabel->setObjectName(QStringLiteral("messageSendStatus"));
-    m_statusLabel->hide();
-    bottomRow->addWidget(m_statusLabel);
     bottomRow->addStretch(1);
 
     m_sendButton = new QPushButton(QStringLiteral("发送  ↗"), this);
@@ -120,6 +133,8 @@ InputBar::InputBar(QWidget *parent)
 
     connect(m_sendButton, &QPushButton::clicked,
             this, &InputBar::handleSendClicked);
+    connect(m_historyButton, &QPushButton::clicked,
+            this, &InputBar::historyRequested);
 }
 
 void InputBar::clearInput()
@@ -132,6 +147,19 @@ QString InputBar::inputText() const
     return m_editor->toPlainText();
 }
 
+void InputBar::setHistoryLoading(bool loading, bool hasMore, bool hasConversation)
+{
+    if (m_historyButton == nullptr)
+    {
+        return;
+    }
+
+    m_historyButton->setEnabled(!loading && hasMore && hasConversation);
+    m_historyButton->setText(loading ? QStringLiteral("正在加载…")
+                                     : (hasMore ? QStringLiteral("加载历史消息")
+                                                : QStringLiteral("没有更早的消息")));
+}
+
 void InputBar::setStatusMessage(const QString &message, bool isError)
 {
     if (m_statusLabel == nullptr)
@@ -141,8 +169,6 @@ void InputBar::setStatusMessage(const QString &message, bool isError)
 
     m_statusLabel->setText(message);
     m_statusLabel->setProperty("error", isError);
-
-    // 属性变化后重新应用 QSS，让错误状态切换为红色，但不改变控件尺寸。
     m_statusLabel->style()->unpolish(m_statusLabel);
     m_statusLabel->style()->polish(m_statusLabel);
     m_statusLabel->setVisible(!message.isEmpty());
@@ -174,7 +200,6 @@ void InputBar::handleSendClicked()
         return;
     }
 
-    // 只有控制器确认请求已成功交给 TCP 层后才清空输入框。
-    // 如果当前会话没有真实 ID 或网络发送失败，保留用户草稿，避免内容丢失。
     emit sendRequested(text);
+    m_editor->clear();
 }

@@ -22,12 +22,16 @@ public:
     // 返回当前编辑框中的文本。
     QString inputText() const;
 
-    // 在输入区显示发送状态，例如“发送中”或服务器返回的失败原因。
+    // 更新历史消息按钮状态；是否存在真实会话由 ChatArea 传入。
+    void setHistoryLoading(bool loading, bool hasMore = true, bool hasConversation = true);
+    // 在输入区显示发送结果或错误，不使用模态弹窗。
     void setStatusMessage(const QString &message, bool isError = false);
 
 signals:
     // 点击“发送”后发出；聊天区域或控制器可以连接此信号处理消息。
     void sendRequested(const QString &text);
+    // 用户点击工具栏右侧的“加载历史消息”按钮时发出。
+    void historyRequested();
 
 private slots:
     // 读取编辑框内容，去掉首尾空白后发送非空文本。
@@ -38,7 +42,8 @@ protected:
     bool eventFilter(QObject *watched, QEvent *event) override;
 
 private:
-    QTextEdit *m_editor = nullptr;       // 多行消息编辑框。
-    QPushButton *m_sendButton = nullptr; // 渐变发送按钮。
-    QLabel *m_statusLabel = nullptr;     // 显示网络发送状态，不打断用户输入。
+    QTextEdit *m_editor = nullptr;        // 多行消息编辑框。
+    QPushButton *m_sendButton = nullptr;  // 渐变发送按钮。
+    QPushButton *m_historyButton = nullptr; // 位于工具栏右侧的历史消息按钮。
+    QLabel *m_statusLabel = nullptr;      // 非模态发送状态提示，默认隐藏。
 };

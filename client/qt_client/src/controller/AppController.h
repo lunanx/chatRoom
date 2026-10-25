@@ -5,6 +5,7 @@
 #include <QHash>
 #include <QJsonObject>
 #include <QQueue>
+#include <QSet>
 #include <QString>
 #include <QTimer>
 #include <QtGlobal>
@@ -45,6 +46,7 @@ private slots:
 
     // 当前已登录用户在选中的真实会话中发送一条文本消息。
     void onMessageSendRequested(const QString &text, quint64 conversationId, bool isGroup);
+    void onHistoryRequested(quint64 conversationId);
 
 private:
     // 一个请求在真正发送前需要保存命令、编号和 JSON 内容。
@@ -77,6 +79,7 @@ private:
 
     void stopMessageRequestTimer(quint64 requestId);
     void clearMessageRequestTimers();
+    void handleHistoryResponse(quint64 requestId, protocolHeader::CommandType responseCommand, const QByteArray &jsonBody);
 
     // 统一显示紫灰主题提示框。
     void showResponseMessage(const QString &title,
@@ -115,4 +118,11 @@ private:
 
     // 消息可以连续发送，单独为每条消息计时，避免一个响应重置其他消息的超时。
     QHash<quint64, QTimer *> m_messageRequestTimers;
+
+    // 历史消息请求单独记录会话 ID；服务端分页游标是该会话当前已加载的最早 seq。
+    QHash<quint64, quint64> m_historyRequests;
+    QHash<quint64, QTimer *> m_historyRequestTimers;
+    QHash<quint64, quint64> m_historyCursors;
+    QSet<quint64> m_historyLoadingConversations;
+    QSet<quint64> m_historyExhaustedConversations;
 };
