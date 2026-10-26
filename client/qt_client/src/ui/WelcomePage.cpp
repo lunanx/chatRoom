@@ -5,6 +5,7 @@
 #include <QLabel>
 #include <QPaintEvent>
 #include <QResizeEvent>
+#include <QStyle>
 #include <QPainter>
 #include <QPushButton>
 #include <QVBoxLayout>
@@ -64,9 +65,10 @@ WelcomePage::WelcomePage(QWidget *parent)
     m_enterButton->setCursor(Qt::PointingHandCursor);
     m_enterButton->setFixedSize(160, 48);
 
-    auto *footnote = new QLabel(QStringLiteral("轻松连接 · 自在表达 · Go聊"), this);
-    footnote->setObjectName(QStringLiteral("welcomeFootnote"));
-    footnote->setAlignment(Qt::AlignCenter);
+    m_footnote = new QLabel(QStringLiteral("轻松连接 · 自在表达 · Go聊"), this);
+    m_footnote->setObjectName(QStringLiteral("welcomeFootnote"));
+    m_footnote->setAlignment(Qt::AlignCenter);
+    m_footnote->setProperty("networkState", QStringLiteral("idle"));
 
     rootLayout->addStretch(1);
     rootLayout->addWidget(logo, 0, Qt::AlignHCenter);
@@ -79,13 +81,28 @@ WelcomePage::WelcomePage(QWidget *parent)
     rootLayout->addSpacing(32);
     rootLayout->addWidget(m_enterButton, 0, Qt::AlignHCenter);
     rootLayout->addStretch(1);
-    rootLayout->addWidget(footnote, 0, Qt::AlignHCenter);
+    rootLayout->addWidget(m_footnote, 0, Qt::AlignHCenter);
 
     // 按钮只负责发出信号，不直接依赖 MainWindow。
     connect(m_enterButton, &QPushButton::clicked,
             this, &WelcomePage::enterRequested);
 
     loadPageStyle(this, QStringLiteral(":/styles/WelcomePage.qss"));
+}
+
+void WelcomePage::setNetworkStatus(const QString &message, const QString &state)
+{
+    if (m_footnote == nullptr)
+    {
+        return;
+    }
+
+    const bool idle = state == QStringLiteral("idle") || message.isEmpty();
+    m_footnote->setText(idle ? QStringLiteral("轻松连接 · 自在表达 · Go聊") : message);
+    m_footnote->setProperty("networkState", idle ? QStringLiteral("idle") : state);
+    m_footnote->style()->unpolish(m_footnote);
+    m_footnote->style()->polish(m_footnote);
+    m_footnote->update();
 }
 
 void WelcomePage::paintEvent(QPaintEvent *event)

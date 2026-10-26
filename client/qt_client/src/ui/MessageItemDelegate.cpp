@@ -115,9 +115,28 @@ void MessageItemDelegate::paint(QPainter *painter,
     const QString text = index.data(MessageListModel::ContentRole).toString();
     const QString senderName = index.data(MessageListModel::SenderNameRole).toString();
     const QString timeText = index.data(MessageListModel::TimeTextRole).toString();
-    const QString metaText = (!isSelf && !senderName.isEmpty())
-                                 ? senderName + QStringLiteral("  ") + timeText
-                                 : timeText;
+    const auto sendState = static_cast<MessageSendState>(
+        index.data(MessageListModel::SendStateRole).toInt());
+
+    QString metaText = (!isSelf && !senderName.isEmpty())
+                           ? senderName + QStringLiteral("  ") + timeText
+                           : timeText;
+    if (isSelf)
+    {
+        switch (sendState)
+        {
+        case MessageSendState::Pending:
+            metaText += QStringLiteral("  发送中…");
+            break;
+        case MessageSendState::Failed:
+            metaText += QStringLiteral("  发送失败 · 重试 ↻");
+            break;
+        case MessageSendState::Sent:
+        default:
+            metaText += QStringLiteral("  ✓");
+            break;
+        }
+    }
 
     const int maxBubbleWidth = bubbleMaximumWidth(qRound(rowRect.width()));
     const int bubbleWidth = bubbleWidthFor(text, maxBubbleWidth);
@@ -138,10 +157,23 @@ void MessageItemDelegate::paint(QPainter *painter,
 
     // 元信息放在消息气泡上方；自己的消息靠右，对方消息靠左。
     painter->setFont(metaFont());
-    painter->setPen(QColor(163, 155, 185));
+    if (isSelf && sendState == MessageSendState::Failed)
+    {
+        painter->setPen(QColor(184, 105, 133)); // 克制的错误玫瑰色
+    }
+    else if (isSelf && sendState == MessageSendState::Pending)
+    {
+        painter->setPen(QColor(174, 164, 198)); // 发送中使用较淡的提示色
+    }
+    else
+    {
+        painter->setPen(QColor(163, 155, 185));
+    }
     const QFontMetrics metaMetrics(metaFont());
     const qreal metaWidth = metaMetrics.horizontalAdvance(metaText);
-    const qreal metaX = isSelf ? bubbleRect.right() - metaWidth : bubbleRect.left();
+    const qreal metaX = isSelf
+                            ? qMax(rowRect.left() + kOuterMargin, bubbleRect.right() - metaWidth)
+                            : bubbleRect.left();
     painter->drawText(QPointF(metaX, rowRect.top() + kOuterMargin + metaMetrics.ascent()), metaText);
 
     // 头像采用渐变圆形占位，文字取发送者名称首字。

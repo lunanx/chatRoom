@@ -1,8 +1,10 @@
 #pragma once
 
 #include <QWidget>
+#include <QString>
 
 class QCheckBox;
+class QLabel;
 class QLineEdit;
 class QPushButton;
 class QEvent;
@@ -17,7 +19,10 @@ class AuthPage : public QWidget
 public:
     explicit AuthPage(QWidget *parent = nullptr);
 
-    // 便于 MainWindow 在切换到登录页时将光标放入账号输入框。
+    // 显示当前 TCP 连接状态，不代替服务端的登录结果。
+    void setNetworkStatus(const QString &message, const QString &state);
+
+    // 便于外部将光标放入账号输入框。
     void focusAccountInput();
 
 signals:
@@ -34,6 +39,7 @@ protected:
     void resizeEvent(QResizeEvent *event) override;
 
 private:
+    QLabel *m_networkStatusLabel = nullptr;
     QLineEdit *m_accountEdit = nullptr;
     QLineEdit *m_passwordEdit = nullptr;
     QCheckBox *m_rememberCheckBox = nullptr;

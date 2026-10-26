@@ -97,6 +97,7 @@ AppController::AppController(QObject *parent)
             m_isAuthenticated = false;
             m_currentAccount.clear();
             returnToLoginWindow();
+            setNetworkStatus(QStringLiteral("退出登录超时 · 连接已重置"), QStringLiteral("disconnected"));
             m_tcpClient->abortConnection();
             showResponseMessage(
                 QStringLiteral("退出登录超时"),
@@ -108,6 +109,7 @@ AppController::AppController(QObject *parent)
             // 登录请求可能已被服务器处理，只是响应没有到达客户端。
             // 主动断开连接，避免服务端已登录而客户端仍停留在登录页的状态不一致。
             m_tcpClient->abortConnection();
+            setNetworkStatus(QStringLiteral("服务器响应超时 · 请检查网络"), QStringLiteral("error"));
             showResponseMessage(
                 QStringLiteral("服务器响应超时"),
                 QStringLiteral("服务器暂时没有返回登录/注册结果，请检查服务端后重试。"),
@@ -144,6 +146,11 @@ AppController::AppController(QObject *parent)
             m_isAuthenticated = false;
             m_currentAccount.clear();
             returnToLoginWindow();
+            setNetworkStatus(QStringLiteral("通信异常 · 请重新登录"), QStringLiteral("error"));
+        }
+        else
+        {
+            setNetworkStatus(QStringLiteral("通信协议异常"), QStringLiteral("error"));
         }
 
         showResponseMessage(QStringLiteral("通信协议错误"), message, true);
@@ -317,18 +324,25 @@ bool AppController::sendRequest(const PendingRequest &request)
 
 void AppController::ensureServerConnection()
 {
-    if (m_tcpClient->isConnected() || m_isConnecting || m_serverHost.isEmpty())
+    if (m_tcpClient->isConnected())
+    {
+        setNetworkStatus(QStringLiteral("服务器已连接"), QStringLiteral("connected"));
+        return;
+    }
+    if (m_isConnecting || m_serverHost.isEmpty())
     {
         return;
     }
 
     m_isConnecting = true;
+    setNetworkStatus(QStringLiteral("正在连接服务器…"), QStringLiteral("connecting"));
     m_tcpClient->connectToServer(m_serverHost, m_serverPort);
 }
 
 void AppController::onConnectedToServer()
 {
     m_isConnecting = false;
+    setNetworkStatus(QStringLiteral("已连接服务器，正在验证账号…"), QStringLiteral("connected"));
     sendPendingRequests();
 }
 
@@ -349,6 +363,7 @@ void AppController::onDisconnectedFromServer()
         m_isAuthenticated = false;
         m_currentAccount.clear();
         returnToLoginWindow();
+        setNetworkStatus(QStringLiteral("连接已断开 · 请重新登录"), QStringLiteral("disconnected"));
         showResponseMessage(
             QStringLiteral("连接已断开"),
             QStringLiteral("与服务器的连接已断开，已返回登录界面，请重新登录。"),
@@ -356,10 +371,17 @@ void AppController::onDisconnectedFromServer()
     }
     else if (wasAuthenticationPending)
     {
+        setNetworkStatus(QStringLiteral("连接已断开 · 请检查网络后重试"), QStringLiteral("disconnected"));
         showResponseMessage(
             QStringLiteral("连接已断开"),
             QStringLiteral("请求完成前连接已断开，请检查网络后重试。"),
             true);
+    }
+    else if (m_networkStatusState == QStringLiteral("connected") ||
+             m_networkStatusState == QStringLiteral("connecting"))
+    {
+        // 若前面的错误处理已经设置了更具体的错误文案，不用普通断开事件覆盖它。
+        setNetworkStatus(QStringLiteral("尚未连接服务器"), QStringLiteral("disconnected"));
     }
 }
 
@@ -378,6 +400,7 @@ void AppController::onConnectionError(const QString &message)
         m_isAuthenticated = false;
         m_currentAccount.clear();
         returnToLoginWindow();
+        setNetworkStatus(QStringLiteral("连接已断开 · 请重新登录"), QStringLiteral("disconnected"));
         m_tcpClient->abortConnection();
         showResponseMessage(
             QStringLiteral("连接已断开"),
@@ -386,6 +409,7 @@ void AppController::onConnectionError(const QString &message)
     }
     else if (hadPendingRequest)
     {
+        setNetworkStatus(QStringLiteral("连接失败 · 请检查地址、端口和服务端"), QStringLiteral("error"));
         showResponseMessage(
             QStringLiteral("服务器连接失败"),
             message + QStringLiteral("\n\n请检查 client.conf 中的 SERVER_HOST 和 SERVER_PORT，以及服务端是否已启动。"),
@@ -486,11 +510,23 @@ void AppController::onPacketReceived(quint16 command,
         originalCommand == protocolHeader::CommandType::PRIVATE_MESSAGE_SEND;
     if (isMessageSendRequest)
     {
+        const QString clientMessageId = m_messageRequestClientIds.take(requestId);
+        m_messagesInFlight.remove(clientMessageId);
         stopMessageRequestTimer(requestId);
+
+        const auto markMessageFailed = [this, &clientMessageId]()
+        {
+            if (m_mainWindow != nullptr && !clientMessageId.isEmpty())
+            {
+                m_mainWindow->setMessageSendState(
+                    clientMessageId, MessageSendState::Failed);
+            }
+        };
 
         if (responseCommand != protocolHeader::CommandType::MESSAGE_SEND_SUCCESS &&
             responseCommand != protocolHeader::CommandType::MESSAGE_SEND_FAILED)
         {
+            markMessageFailed();
             if (m_mainWindow != nullptr)
             {
                 m_mainWindow->setMessageStatus(
@@ -504,6 +540,7 @@ void AppController::onPacketReceived(quint16 command,
             QJsonDocument::fromJson(jsonBody, &messageParseError);
         if (messageParseError.error != QJsonParseError::NoError || !messageDocument.isObject())
         {
+            markMessageFailed();
             if (m_mainWindow != nullptr)
             {
                 m_mainWindow->setMessageStatus(
@@ -521,13 +558,44 @@ void AppController::onPacketReceived(quint16 command,
         {
             if (responseCommand == protocolHeader::CommandType::MESSAGE_SEND_SUCCESS)
             {
+                // 老协议把 server_msg_id/seq 放在 JSON 最外层；若将来放进 data，
+                // 也兼容读取 data 对象，但不强迫服务端迁移旧响应格式。
+                QJsonObject acknowledgement = messageBody;
+                const QJsonValue dataValue = acknowledgement.value(QString::fromLatin1(protocolBody::DATA));
+                if (dataValue.isObject())
+                {
+                    acknowledgement = dataValue.toObject();
+                }
+
+                quint64 acknowledgedServerId = 0;
+                quint64 acknowledgedSequence = 0;
+                const QString acknowledgedClientId = acknowledgement
+                    .value(QString::fromLatin1(protocolBody::CLIENT_MSG_ID)).toString();
+                if (!clientMessageId.isEmpty() && acknowledgedClientId == clientMessageId &&
+                    readPositiveJsonInteger(acknowledgement, protocolBody::SERVER_MSG_ID,
+                                            acknowledgedServerId) &&
+                    readPositiveJsonInteger(acknowledgement, protocolBody::SEQ,
+                                            acknowledgedSequence))
+                {
+                    m_mainWindow->confirmPendingMessage(
+                        clientMessageId, acknowledgedServerId, acknowledgedSequence);
+                }
+                else if (!clientMessageId.isEmpty())
+                {
+                    m_mainWindow->setMessageSendState(
+                        clientMessageId, MessageSendState::Sent);
+                }
+
+                m_retryableMessages.remove(clientMessageId);
                 m_mainWindow->setMessageStatus(QStringLiteral("消息已保存到服务器"), false);
                 // 服务端已持久化最新消息，刷新列表摘要和最近活动时间。
                 requestConversationList();
             }
             else
             {
-                m_mainWindow->setMessageStatus(resultMessage, true);
+                markMessageFailed();
+                m_mainWindow->setMessageStatus(
+                    resultMessage + QStringLiteral("；点击失败消息可重试"), true);
             }
         }
         return;
@@ -559,6 +627,7 @@ void AppController::onPacketReceived(quint16 command,
             m_isAuthenticated = false;
             m_currentAccount.clear();
             returnToLoginWindow();
+            setNetworkStatus(QStringLiteral("服务器响应异常 · 请重新登录"), QStringLiteral("error"));
             if (m_tcpClient->isConnected())
             {
                 m_tcpClient->abortConnection();
@@ -583,6 +652,7 @@ void AppController::onPacketReceived(quint16 command,
             m_isAuthenticated = false;
             m_currentAccount.clear();
             returnToLoginWindow();
+            setNetworkStatus(QStringLiteral("服务器响应格式异常 · 请重新登录"), QStringLiteral("error"));
             if (m_tcpClient->isConnected())
             {
                 m_tcpClient->abortConnection();
@@ -612,14 +682,32 @@ void AppController::onPacketReceived(quint16 command,
 
     case protocolHeader::CommandType::LOGIN_FAILED:
         m_pendingLoginAccount.clear();
+        setNetworkStatus(m_tcpClient->isConnected()
+                             ? QStringLiteral("服务器已连接")
+                             : QStringLiteral("连接已断开"),
+                         m_tcpClient->isConnected()
+                             ? QStringLiteral("connected")
+                             : QStringLiteral("disconnected"));
         showResponseMessage(QStringLiteral("登录失败"), message, true);
         break;
 
     case protocolHeader::CommandType::REGISTER_SUCCESS:
+        setNetworkStatus(m_tcpClient->isConnected()
+                             ? QStringLiteral("服务器已连接")
+                             : QStringLiteral("连接已断开"),
+                         m_tcpClient->isConnected()
+                             ? QStringLiteral("connected")
+                             : QStringLiteral("disconnected"));
         showResponseMessage(QStringLiteral("注册成功"), message, false);
         break;
 
     case protocolHeader::CommandType::REGISTER_FAILED:
+        setNetworkStatus(m_tcpClient->isConnected()
+                             ? QStringLiteral("服务器已连接")
+                             : QStringLiteral("连接已断开"),
+                         m_tcpClient->isConnected()
+                             ? QStringLiteral("connected")
+                             : QStringLiteral("disconnected"));
         showResponseMessage(QStringLiteral("注册失败"), message, true);
         break;
 
@@ -655,14 +743,13 @@ void AppController::onMessageSendRequested(const QString &text,
         return;
     }
 
-    // 断线后的登录状态会由连接事件清理；这里再做一次防御检查，避免向失效连接写数据。
+    // 当前协议将已登录身份绑定在 TCP 连接上；连接失效后需要重新登录。
     if (!m_tcpClient->isConnected())
     {
-        m_mainWindow->setMessageStatus(QStringLiteral("连接已断开，请重新登录"), true);
+        m_mainWindow->setMessageStatus(QStringLiteral("连接已断开，请重新登录；输入内容已保留"), true);
         return;
     }
 
-    // 没有真实会话 ID 时不能猜测目标会话，因此不发送网络请求。
     if (conversationId == 0)
     {
         m_mainWindow->setMessageStatus(
@@ -672,7 +759,7 @@ void AppController::onMessageSendRequested(const QString &text,
 
     const QString content = text.trimmed();
     const QByteArray utf8Content = content.toUtf8();
-    if (content.trimmed().isEmpty())
+    if (content.isEmpty())
     {
         return;
     }
@@ -685,45 +772,90 @@ void AppController::onMessageSendRequested(const QString &text,
         return;
     }
 
+    const QString clientMessageId = QUuid::createUuid().toString(QUuid::WithoutBraces);
     QJsonObject body;
     body.insert(QString::fromLatin1(protocolBody::CONTENT), content);
     body.insert(QString::fromLatin1(protocolBody::CONVERSATION_ID),
                 QJsonValue(static_cast<qint64>(conversationId)));
-    body.insert(QString::fromLatin1(protocolBody::CLIENT_MSG_ID),
-                QUuid::createUuid().toString(QUuid::WithoutBraces));
+    body.insert(QString::fromLatin1(protocolBody::CLIENT_MSG_ID), clientMessageId);
     body.insert(QString::fromLatin1(protocolBody::TYPE), 1); // 1 表示文本消息。
 
-    const quint64 requestId = m_nextRequestId++;
     const auto command = isGroup
         ? protocolHeader::CommandType::GROUP_MESSAGE_SEND
         : protocolHeader::CommandType::PRIVATE_MESSAGE_SEND;
+    const quint64 requestId = m_nextRequestId++;
     const PendingRequest request{command, requestId, body};
 
+    // 新的发送操作开始时清除上一条提示；本次若失败，会立即显示新的错误原因。
+    m_mainWindow->setMessageStatus(QString(), false);
+
+    // 若 TCP 层都没有接受请求，不创建气泡，也不清空编辑框。用户可直接再次点击发送。
     if (!sendRequest(request))
     {
-        m_mainWindow->setMessageStatus(QStringLiteral("消息发送失败，请检查网络连接"), true);
+        m_mainWindow->setMessageStatus(
+            QStringLiteral("消息未能提交到网络层，请检查连接；输入内容已保留"), true);
         return;
     }
 
-    // 每条消息单独等待服务器确认，避免用户连续发送时超时互相影响。
-    auto *timer = new QTimer(this);
-    timer->setSingleShot(true);
-    connect(timer, &QTimer::timeout, this, [this, requestId]()
+    // 请求已交给 TCP 层后，再插入本地待确认气泡并清空编辑框。
+    ChatMessageRecord pendingMessage;
+    pendingMessage.conversationId = conversationId;
+    pendingMessage.clientMessageId = clientMessageId;
+    pendingMessage.senderName = m_currentAccount;
+    pendingMessage.content = content;
+    pendingMessage.timeText = QDateTime::currentDateTime().toString(QStringLiteral("HH:mm"));
+    pendingMessage.sendState = MessageSendState::Pending;
+    m_mainWindow->appendMessage(pendingMessage);
+
+    m_retryableMessages.insert(clientMessageId, RetryableMessage{command, body});
+    m_messageRequestClientIds.insert(requestId, clientMessageId);
+    m_messagesInFlight.insert(clientMessageId);
+    startMessageRequestTimer(requestId, clientMessageId);
+
+    m_mainWindow->clearMessageInput();
+    m_mainWindow->setMessageStatus(QStringLiteral("消息已提交，等待服务器确认…"), false);
+}
+
+void AppController::onMessageRetryRequested(const QString &clientMessageId)
+{
+    if (clientMessageId.isEmpty() || !m_retryableMessages.contains(clientMessageId))
     {
-        const bool wasWaiting = m_requestsAwaitingResponse.remove(requestId) > 0;
-        stopMessageRequestTimer(requestId);
-        if (wasWaiting && m_mainWindow != nullptr)
+        return;
+    }
+    if (m_messagesInFlight.contains(clientMessageId))
+    {
+        // 一条消息在任何时刻都只能有一次发送请求在等待确认。
+        return;
+    }
+    if (!m_isAuthenticated || m_isLoggingOut || m_mainWindow == nullptr ||
+        !m_tcpClient->isConnected())
+    {
+        if (m_mainWindow != nullptr)
         {
             m_mainWindow->setMessageStatus(
-                QStringLiteral("消息发送超时，服务器没有返回确认"), true);
+                QStringLiteral("连接已失效，请重新登录后再重试消息"), true);
         }
-    });
-    m_messageRequestTimers.insert(requestId, timer);
-    timer->start(15000);
+        return;
+    }
 
-    // 只有本地 TCP 层接受了数据包，才把这条文本视作已提交发送。
-    m_mainWindow->clearMessageInput();
-    m_mainWindow->setMessageStatus(QStringLiteral("消息发送中…"), false);
+    // 使用保存的原请求正文；特别是 client_msg_id 绝不重新生成，确保服务端幂等。
+    const RetryableMessage retry = m_retryableMessages.value(clientMessageId);
+    const quint64 requestId = m_nextRequestId++;
+    const PendingRequest request{retry.command, requestId, retry.body};
+    m_mainWindow->setMessageStatus(QString(), false);
+    if (!sendRequest(request))
+    {
+        m_mainWindow->setMessageSendState(clientMessageId, MessageSendState::Failed);
+        m_mainWindow->setMessageStatus(
+            QStringLiteral("重试请求未能提交到网络层，请检查连接"), true);
+        return;
+    }
+
+    m_mainWindow->setMessageSendState(clientMessageId, MessageSendState::Pending);
+    m_messageRequestClientIds.insert(requestId, clientMessageId);
+    m_messagesInFlight.insert(clientMessageId);
+    startMessageRequestTimer(requestId, clientMessageId);
+    m_mainWindow->setMessageStatus(QStringLiteral("正在重试发送消息…"), false);
 }
 
 void AppController::onLogoutRequested()
@@ -847,6 +979,14 @@ void AppController::handleIncomingMessagePush(protocolHeader::CommandType comman
     {
         // 新消息到达后更新会话列表里的摘要/排序；请求在途时只安排一次后续刷新。
         requestConversationList();
+    }
+
+    // 有些服务端路径会把发送者自己的已保存消息也推回来。该推送同样可以
+    // 确认乐观消息，并覆盖先前可能出现的发送超时状态。
+    if (message.senderName.compare(m_currentAccount, Qt::CaseInsensitive) == 0)
+    {
+        m_mainWindow->setMessageSendState(message.clientMessageId, MessageSendState::Sent);
+        m_retryableMessages.remove(message.clientMessageId);
     }
 
     Q_UNUSED(command); // 私聊/群聊命令只用来区分协议事件，气泡样式不依赖会话类型。
@@ -1588,12 +1728,15 @@ void AppController::onLoginSucceeded()
                 this, &AppController::onHistoryRequested);
         connect(m_mainWindow, &MainWindow::messageSendRequested,
                 this, &AppController::onMessageSendRequested);
+        connect(m_mainWindow, &MainWindow::messageRetryRequested,
+                this, &AppController::onMessageRetryRequested);
         connect(m_mainWindow, &MainWindow::newSessionRequested,
                 this, &AppController::onNewSessionRequested);
     }
 
     m_mainWindow->clearSessions();
     m_mainWindow->setCurrentUsername(m_currentAccount);
+    setNetworkStatus(QStringLiteral("服务器连接正常"), QStringLiteral("connected"));
     m_mainWindow->show();
     m_mainWindow->raise();
     m_mainWindow->activateWindow();
@@ -1629,13 +1772,53 @@ void AppController::clearMessageRequestTimers()
     }
 }
 
+void AppController::startMessageRequestTimer(quint64 requestId, const QString &clientMessageId)
+{
+    auto *timer = new QTimer(this);
+    timer->setSingleShot(true);
+    m_messageRequestTimers.insert(requestId, timer);
+    connect(timer, &QTimer::timeout, this, [this, requestId, clientMessageId]()
+    {
+        const bool wasWaiting = m_requestsAwaitingResponse.remove(requestId) > 0;
+        m_messageRequestClientIds.remove(requestId);
+        m_messagesInFlight.remove(clientMessageId);
+        stopMessageRequestTimer(requestId);
+
+        // 如果收到自己的服务端推送，消息可能已被确认，超时回调不能再把它改回失败。
+        if (wasWaiting && m_retryableMessages.contains(clientMessageId))
+        {
+            if (m_mainWindow != nullptr)
+            {
+                m_mainWindow->setMessageSendState(
+                    clientMessageId, MessageSendState::Failed);
+                m_mainWindow->setMessageStatus(
+                    QStringLiteral("消息确认超时，点击失败消息可使用原 ID 重试"), true);
+            }
+        }
+    });
+    timer->start(15000);
+}
+
 void AppController::clearPendingRequests()
 {
     m_authRequestPending = false;
     m_isLoggingOut = false;
     m_requestTimer.stop();
+
+    // 清理请求前先让仍在等待确认的气泡退出“发送中”，避免界面留下永久转圈状态。
+    if (m_mainWindow != nullptr)
+    {
+        const auto requestClientIds = m_messageRequestClientIds;
+        for (auto it = requestClientIds.cbegin(); it != requestClientIds.cend(); ++it)
+        {
+            m_mainWindow->setMessageSendState(it.value(), MessageSendState::Failed);
+        }
+    }
+
     clearMessageRequestTimers();
     clearOperationRequestTimers();
+    m_messageRequestClientIds.clear();
+    m_messagesInFlight.clear();
     m_pendingRequests.clear();
     m_requestsAwaitingResponse.clear();
 }
@@ -1644,6 +1827,9 @@ void AppController::returnToLoginWindow()
 {
     // 不让上一账号未完成的会话列表/好友列表/消息请求在下次登录后更新界面。
     clearPendingRequests();
+    m_retryableMessages.clear();
+    m_messageRequestClientIds.clear();
+    m_messagesInFlight.clear();
     for (auto it = m_historyRequests.cbegin(); it != m_historyRequests.cend(); ++it)
     {
         m_requestsAwaitingResponse.remove(it.key());
@@ -1677,6 +1863,19 @@ void AppController::returnToLoginWindow()
         m_loginWindow->show();
         m_loginWindow->raise();
         m_loginWindow->activateWindow();
+    }
+}
+
+void AppController::setNetworkStatus(const QString &message, const QString &state)
+{
+    m_networkStatusState = state;
+    if (m_loginWindow != nullptr)
+    {
+        m_loginWindow->setNetworkStatus(message, state);
+    }
+    if (m_mainWindow != nullptr)
+    {
+        m_mainWindow->setNetworkStatus(message, state);
     }
 }
 

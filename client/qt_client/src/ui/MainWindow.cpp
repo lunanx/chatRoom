@@ -108,6 +108,8 @@ QWidget *MainWindow::createChatWorkspacePage()
             });
     connect(chatArea, &ChatArea::historyRequested,
             this, &MainWindow::historyRequested);
+    connect(chatArea, &ChatArea::retryMessageRequested,
+            this, &MainWindow::messageRetryRequested);
 
     splitter->addWidget(sideBar);
     splitter->addWidget(sessionPanel);
@@ -155,6 +157,14 @@ QWidget *MainWindow::createChatWorkspacePage()
     return page;
 }
 
+void MainWindow::setNetworkStatus(const QString &message, const QString &state)
+{
+    if (m_chatArea != nullptr)
+    {
+        m_chatArea->setNetworkStatus(message, state);
+    }
+}
+
 void MainWindow::setMessageStatus(const QString &message, bool isError)
 {
     if (m_chatArea != nullptr)
@@ -175,6 +185,20 @@ void MainWindow::setCurrentUsername(const QString &username)
 bool MainWindow::appendMessage(const ChatMessageRecord &message)
 {
     return m_chatArea != nullptr && m_chatArea->appendMessage(message);
+}
+
+bool MainWindow::setMessageSendState(const QString &clientMessageId, MessageSendState state)
+{
+    return m_chatArea != nullptr &&
+           m_chatArea->setMessageSendState(clientMessageId, state);
+}
+
+bool MainWindow::confirmPendingMessage(const QString &clientMessageId,
+                                       quint64 serverMessageId,
+                                       quint64 sequence)
+{
+    return m_chatArea != nullptr &&
+           m_chatArea->confirmPendingMessage(clientMessageId, serverMessageId, sequence);
 }
 
 void MainWindow::clearMessages()

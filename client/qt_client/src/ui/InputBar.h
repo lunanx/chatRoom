@@ -6,6 +6,7 @@
 class QLabel;
 class QPushButton;
 class QTextEdit;
+class QTimer;
 class QToolButton;
 
 // 聊天输入区：工具栏、消息编辑框和发送按钮。
@@ -46,4 +47,5 @@ private:
     QPushButton *m_sendButton = nullptr;  // 渐变发送按钮。
     QPushButton *m_historyButton = nullptr; // 位于工具栏右侧的历史消息按钮。
     QLabel *m_statusLabel = nullptr;      // 非模态发送状态提示，默认隐藏。
+    QTimer *m_statusClearTimer = nullptr; // 成功/普通提示短暂显示后自动清理。
 };

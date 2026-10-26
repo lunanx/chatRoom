@@ -40,6 +40,42 @@ QLabel#onlineStatusDot[online="true"] {
     background-color: #50B994;
 }
 
+QWidget#networkStatusBadge {
+    background-color: rgba(255, 255, 255, 0.58);
+    border: 1px solid rgba(108, 91, 154, 0.08);
+    border-radius: 12px;
+}
+QWidget#networkStatusBadge[networkState="connected"] {
+    background-color: rgba(80, 185, 148, 0.08);
+    border-color: rgba(80, 185, 148, 0.16);
+}
+QWidget#networkStatusBadge[networkState="connecting"] {
+    background-color: rgba(128, 107, 255, 0.08);
+    border-color: rgba(128, 107, 255, 0.15);
+}
+QWidget#networkStatusBadge[networkState="disconnected"],
+QWidget#networkStatusBadge[networkState="error"] {
+    background-color: rgba(190, 105, 133, 0.08);
+    border-color: rgba(190, 105, 133, 0.16);
+}
+QLabel#networkStatusDot {
+    border: none;
+    border-radius: 3px;
+    background-color: #A39BB9;
+}
+QLabel#networkStatusDot[networkState="connected"] { background-color: #50B994; }
+QLabel#networkStatusDot[networkState="connecting"] { background-color: #8D7BEE; }
+QLabel#networkStatusDot[networkState="disconnected"],
+QLabel#networkStatusDot[networkState="error"] { background-color: #BE6985; }
+QLabel#networkStatusText {
+    color: #77708F;
+    font-size: 9px;
+}
+QLabel#networkStatusText[networkState="connected"] { color: #398B73; }
+QLabel#networkStatusText[networkState="connecting"] { color: #7763D0; }
+QLabel#networkStatusText[networkState="disconnected"],
+QLabel#networkStatusText[networkState="error"] { color: #B15F7B; }
+
 QListView#messageListView {
     background: transparent;
     border: none;

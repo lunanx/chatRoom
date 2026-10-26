@@ -47,6 +47,7 @@ private slots:
 
     // 当前已登录用户在选中的真实会话中发送一条文本消息。
     void onMessageSendRequested(const QString &text, quint64 conversationId, bool isGroup);
+    void onMessageRetryRequested(const QString &clientMessageId);
     void onHistoryRequested(quint64 conversationId);
     void onNewSessionRequested();
 
@@ -57,6 +58,13 @@ private:
     {
         protocolHeader::CommandType command;
         quint64 requestId;
+        QJsonObject body;
+    };
+
+    // 重试必须复用原 client_msg_id 和原请求正文，保证服务端幂等键不变。
+    struct RetryableMessage
+    {
+        protocolHeader::CommandType command;
         QJsonObject body;
     };
 
@@ -81,6 +89,7 @@ private:
 
     void stopMessageRequestTimer(quint64 requestId);
     void clearMessageRequestTimers();
+    void startMessageRequestTimer(quint64 requestId, const QString &clientMessageId);
 
     // 非消息业务请求（会话列表、好友列表、创建会话）单独计时，避免无响应时一直等待。
     quint64 sendOperationRequest(protocolHeader::CommandType command, const QJsonObject &body);
@@ -100,6 +109,8 @@ private:
     void showResponseMessage(const QString &title,
                              const QString &message,
                              bool isError);
+    // 同步主窗口与登录窗口的网络状态提示。
+    void setNetworkStatus(const QString &message, const QString &state);
 
 private:
     TcpClient *m_tcpClient = nullptr;
@@ -110,6 +121,7 @@ private:
     quint16 m_serverPort = 0;
     bool m_configurationValid = false;
     bool m_isConnecting = false;
+    QString m_networkStatusState = QStringLiteral("idle");
 
     quint64 m_nextRequestId = 1;
     QQueue<PendingRequest> m_pendingRequests;
@@ -133,6 +145,9 @@ private:
 
     // 消息可以连续发送，单独为每条消息计时，避免一个响应重置其他消息的超时。
     QHash<quint64, QTimer *> m_messageRequestTimers;
+    QHash<quint64, QString> m_messageRequestClientIds;
+    QHash<QString, RetryableMessage> m_retryableMessages;
+    QSet<QString> m_messagesInFlight;
 
     // 为会话列表/好友列表/创建会话这类普通请求单独保存超时计时器。
     QHash<quint64, QTimer *> m_operationRequestTimers;

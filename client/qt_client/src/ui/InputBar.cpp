@@ -16,6 +16,7 @@
 #include <QColor>
 #include <QPalette>
 #include <QStyle>
+#include <QTimer>
 
 namespace
 {
@@ -104,6 +105,18 @@ InputBar::InputBar(QWidget *parent)
     m_statusLabel->hide();
     rootLayout->addWidget(m_statusLabel);
 
+    // 普通成功/提示信息无需永久占据输入区；错误状态会保留，直到下一次状态更新。
+    m_statusClearTimer = new QTimer(this);
+    m_statusClearTimer->setSingleShot(true);
+    connect(m_statusClearTimer, &QTimer::timeout, this, [this]()
+    {
+        if (m_statusLabel != nullptr && !m_statusLabel->property("error").toBool())
+        {
+            m_statusLabel->clear();
+            m_statusLabel->hide();
+        }
+    });
+
     // 编辑框不显示原生边框，外观由父级 InputBar.qss 统一控制。
     m_editor = new QTextEdit(this);
     m_editor->setObjectName(QStringLiteral("messageEditor"));
@@ -167,11 +180,21 @@ void InputBar::setStatusMessage(const QString &message, bool isError)
         return;
     }
 
+    if (m_statusClearTimer != nullptr)
+    {
+        m_statusClearTimer->stop();
+    }
+
     m_statusLabel->setText(message);
     m_statusLabel->setProperty("error", isError);
     m_statusLabel->style()->unpolish(m_statusLabel);
     m_statusLabel->style()->polish(m_statusLabel);
     m_statusLabel->setVisible(!message.isEmpty());
+
+    if (!message.isEmpty() && !isError && m_statusClearTimer != nullptr)
+    {
+        m_statusClearTimer->start(3500);
+    }
 }
 
 bool InputBar::eventFilter(QObject *watched, QEvent *event)
@@ -200,6 +223,7 @@ void InputBar::handleSendClicked()
         return;
     }
 
+    // 输入框由 AppController 在 TCP 层接受请求后统一清空。
+    // 如果当前断线或没有选中有效会话，保留正文，避免用户输入意外丢失。
     emit sendRequested(text);
-    m_editor->clear();
 }

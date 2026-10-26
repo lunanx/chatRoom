@@ -17,6 +17,7 @@
 #include <QResizeEvent>
 #include <QPainter>
 #include <QSizePolicy>
+#include <QStyle>
 #include <QLinearGradient>
 
 namespace
@@ -225,6 +226,11 @@ AuthPage::AuthPage(QWidget *parent)
     subtitle->setObjectName(QStringLiteral("authFormSubtitle"));
     subtitle->setWordWrap(true);
 
+    m_networkStatusLabel = new QLabel(QStringLiteral("尚未连接服务器"), form);
+    m_networkStatusLabel->setObjectName(QStringLiteral("authNetworkStatusLabel"));
+    m_networkStatusLabel->setProperty("networkState", QStringLiteral("idle"));
+    m_networkStatusLabel->setMinimumHeight(16);
+
     m_accountEdit = new QLineEdit(form);
     m_accountEdit->setObjectName(QStringLiteral("authAccountEdit"));
     m_accountEdit->setPlaceholderText(QStringLiteral("请输入账号"));
@@ -275,7 +281,9 @@ AuthPage::AuthPage(QWidget *parent)
     formLayout->addWidget(formTitle);
     formLayout->addSpacing(10);
     formLayout->addWidget(subtitle);
-    formLayout->addSpacing(28);
+    formLayout->addSpacing(10);
+    formLayout->addWidget(m_networkStatusLabel);
+    formLayout->addSpacing(10);
     formLayout->addWidget(createField(QStringLiteral("账号"), m_accountEdit, form));
     formLayout->addSpacing(18);
     formLayout->addWidget(createField(QStringLiteral("密码"), m_passwordEdit, form));
@@ -310,6 +318,20 @@ AuthPage::AuthPage(QWidget *parent)
     });
 
     loadPageStyle(this, QStringLiteral(":/styles/AuthPage.qss"));
+}
+
+void AuthPage::setNetworkStatus(const QString &message, const QString &state)
+{
+    if (m_networkStatusLabel == nullptr)
+    {
+        return;
+    }
+
+    m_networkStatusLabel->setText(message);
+    m_networkStatusLabel->setProperty("networkState", state);
+    m_networkStatusLabel->style()->unpolish(m_networkStatusLabel);
+    m_networkStatusLabel->style()->polish(m_networkStatusLabel);
+    m_networkStatusLabel->update();
 }
 
 void AuthPage::focusAccountInput()

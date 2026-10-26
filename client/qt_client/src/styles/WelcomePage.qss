@@ -59,3 +59,7 @@ QLabel#welcomeFootnote {
     font-size: 10px;
     letter-spacing: 1px;
 }
+QLabel#welcomeFootnote[networkState="connected"] { color: #398B73; }
+QLabel#welcomeFootnote[networkState="connecting"] { color: #7763D0; }
+QLabel#welcomeFootnote[networkState="disconnected"],
+QLabel#welcomeFootnote[networkState="error"] { color: #B15F7B; }

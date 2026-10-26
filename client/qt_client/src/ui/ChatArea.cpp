@@ -95,6 +95,26 @@ ChatArea::ChatArea(QWidget *parent)
     headerLayout->addWidget(identityWidget);
     headerLayout->addStretch(1);
 
+    // 服务器连接状态单独显示，不与当前会话类型（私聊/群聊）混在一起。
+    m_networkStatusBadge = new QWidget(header);
+    m_networkStatusBadge->setObjectName(QStringLiteral("networkStatusBadge"));
+    auto *networkStatusLayout = new QHBoxLayout(m_networkStatusBadge);
+    networkStatusLayout->setContentsMargins(9, 5, 9, 5);
+    networkStatusLayout->setSpacing(6);
+
+    m_networkStatusDot = new QLabel(m_networkStatusBadge);
+    m_networkStatusDot->setObjectName(QStringLiteral("networkStatusDot"));
+    m_networkStatusDot->setFixedSize(6, 6);
+
+    m_networkStatusLabel = new QLabel(QStringLiteral("已连接"), m_networkStatusBadge);
+    m_networkStatusLabel->setObjectName(QStringLiteral("networkStatusText"));
+    networkStatusLayout->addWidget(m_networkStatusDot);
+    networkStatusLayout->addWidget(m_networkStatusLabel);
+    headerLayout->addWidget(m_networkStatusBadge);
+    // 为主窗口右上角的自定义窗口控制按钮留出空间，避免和状态徽标重叠。
+    headerLayout->addSpacing(100);
+    setNetworkStatus(QStringLiteral("已连接服务器"), QStringLiteral("connected"));
+
     // 不在 ChatArea 的会话 Header 中创建另一组窗口控制按钮。
     // 顶层窗口的控制按钮统一由 MainWindow 中的 WindowTopControls 提供。
     rootLayout->addWidget(header);
@@ -121,6 +141,8 @@ ChatArea::ChatArea(QWidget *parent)
     m_messageListView->setSpacing(0);
     m_messageListView->setFlow(QListView::TopToBottom);
     m_messageListView->setWrapping(false);
+    m_messageListView->setMouseTracking(true);
+    m_messageListView->viewport()->setMouseTracking(true);
 
     // 消息列表使用 Qt 模型/视图结构：模型保存数据，代理模型按当前会话过滤，
     // Delegate 负责绘制气泡。不会为每条消息创建独立 QWidget。
@@ -130,6 +152,33 @@ ChatArea::ChatArea(QWidget *parent)
     m_messageListView->setModel(m_messageFilterModel);
     m_messageDelegate = new MessageItemDelegate(m_messageListView);
     m_messageListView->setItemDelegate(m_messageDelegate);
+
+    // 失败消息会在元信息处提示“点击重试”。QListView 的 clicked 信号比
+    // Delegate editorEvent 更适合 NoEditTriggers 的只读消息列表。
+    connect(m_messageListView, &QListView::clicked, this, [this](const QModelIndex &index)
+    {
+        if (index.data(MessageListModel::SendStateRole).toInt() ==
+            static_cast<int>(MessageSendState::Failed))
+        {
+            const QString clientMessageId =
+                index.data(MessageListModel::ClientMessageIdRole).toString();
+            if (!clientMessageId.isEmpty())
+            {
+                emit retryMessageRequested(clientMessageId);
+            }
+        }
+    });
+    connect(m_messageListView, &QListView::entered, this, [this](const QModelIndex &index)
+    {
+        const bool retryable = index.data(MessageListModel::SendStateRole).toInt() ==
+                               static_cast<int>(MessageSendState::Failed);
+        m_messageListView->viewport()->setCursor(
+            retryable ? Qt::PointingHandCursor : Qt::ArrowCursor);
+    });
+    connect(m_messageListView, &QListView::viewportEntered, this, [this]()
+    {
+        m_messageListView->viewport()->setCursor(Qt::ArrowCursor);
+    });
 
     // 输入区放在 QSplitter 的下半部分，初始高度约 148px，比之前更紧凑。
     m_inputBar = new InputBar(m_contentSplitter);
@@ -157,6 +206,46 @@ ChatArea::ChatArea(QWidget *parent)
             setMessageStatus(QStringLiteral("请先选择一个真实会话，再加载历史消息"), true);
         }
     });
+}
+
+void ChatArea::setNetworkStatus(const QString &message, const QString &state)
+{
+    if (m_networkStatusLabel == nullptr || m_networkStatusDot == nullptr ||
+        m_networkStatusBadge == nullptr)
+    {
+        return;
+    }
+
+    QString compactText = message;
+    if (state == QStringLiteral("connected"))
+    {
+        compactText = QStringLiteral("已连接");
+    }
+    else if (state == QStringLiteral("connecting"))
+    {
+        compactText = QStringLiteral("连接中…");
+    }
+    else if (state == QStringLiteral("disconnected"))
+    {
+        compactText = QStringLiteral("已断开");
+    }
+    else if (state == QStringLiteral("error"))
+    {
+        compactText = QStringLiteral("连接异常");
+    }
+
+    m_networkStatusLabel->setText(compactText);
+    m_networkStatusBadge->setProperty("networkState", state);
+    m_networkStatusDot->setProperty("networkState", state);
+    m_networkStatusLabel->setProperty("networkState", state);
+
+    QWidget *statusWidgets[] = {m_networkStatusBadge, m_networkStatusDot, m_networkStatusLabel};
+    for (QWidget *widget : statusWidgets)
+    {
+        widget->style()->unpolish(widget);
+        widget->style()->polish(widget);
+        widget->update();
+    }
 }
 
 void ChatArea::setConversationInfo(const QString &name,
@@ -284,6 +373,39 @@ bool ChatArea::appendMessage(const ChatMessageRecord &message)
         });
     }
     return inserted;
+}
+
+bool ChatArea::setMessageSendState(const QString &clientMessageId, MessageSendState state)
+{
+    return m_messageModel != nullptr &&
+           m_messageModel->setSendState(clientMessageId, state);
+}
+
+bool ChatArea::confirmPendingMessage(const QString &clientMessageId,
+                                     quint64 serverMessageId,
+                                     quint64 sequence)
+{
+    const bool confirmed = m_messageModel != nullptr &&
+        m_messageModel->confirmPendingMessage(clientMessageId, serverMessageId, sequence);
+    if (confirmed)
+    {
+        // ACK 可能把待确认项重新插入历史序号中的正确位置，布局结束后再定位到底部。
+        QTimer::singleShot(0, this, [this]()
+        {
+            if (m_currentConversationId == 0)
+            {
+                return;
+            }
+            const int lastRow = m_messageFilterModel->rowCount() - 1;
+            if (lastRow >= 0)
+            {
+                m_messageListView->scrollTo(
+                    m_messageFilterModel->index(lastRow, 0),
+                    QAbstractItemView::PositionAtBottom);
+            }
+        });
+    }
+    return confirmed;
 }
 
 

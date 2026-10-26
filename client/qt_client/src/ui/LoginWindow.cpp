@@ -75,6 +75,18 @@ void LoginWindow::resetToWelcomePage()
     resize(400, 500);
 }
 
+void LoginWindow::setNetworkStatus(const QString &message, const QString &state)
+{
+    if (m_welcomePage != nullptr)
+    {
+        m_welcomePage->setNetworkStatus(message, state);
+    }
+    if (m_authPage != nullptr)
+    {
+        m_authPage->setNetworkStatus(message, state);
+    }
+}
+
 // 无系统标题栏后，允许从页面背景区域拖动窗口。
 bool LoginWindow::eventFilter(QObject *watched, QEvent *event)
 {

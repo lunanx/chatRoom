@@ -1,6 +1,7 @@
 #pragma once
 
 #include <QMainWindow>
+#include <QString>
 #include <QPoint>
 
 class QEvent;
@@ -26,6 +27,8 @@ public slots:
 
     // 退出登录或连接失效后，恢复到初始欢迎页及 400×500 窗口尺寸。
     void resetToWelcomePage();
+    // 同步欢迎页与登录表单中的连接状态提示。
+    void setNetworkStatus(const QString &message, const QString &state);
 
 signals:
     // 向外转发登录和注册请求，方便后续接入 Controller。

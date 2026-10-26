@@ -76,6 +76,16 @@ QLabel#authFormSubtitle {
     font-size: 12px;
 }
 
+QLabel#authNetworkStatusLabel {
+    color: #A39BB9;
+    font-size: 10px;
+    padding-left: 1px;
+}
+QLabel#authNetworkStatusLabel[networkState="connected"] { color: #398B73; }
+QLabel#authNetworkStatusLabel[networkState="connecting"] { color: #7763D0; }
+QLabel#authNetworkStatusLabel[networkState="disconnected"],
+QLabel#authNetworkStatusLabel[networkState="error"] { color: #B15F7B; }
+
 QLabel#authFieldLabel {
     color: #77708F;
     font-size: 11px;
