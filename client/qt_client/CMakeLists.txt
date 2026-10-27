@@ -64,6 +64,10 @@ add_executable(ChatRoomClient
     src/ui/SessionListPanel.cpp
     src/ui/SessionListPanel.qrc
 
+    # 好友列表、添加好友和待处理好友申请
+    src/ui/ContactsPanel.h
+    src/ui/ContactsPanel.cpp
+
     # 右侧聊天区域、输入区以及对应的 QSS 资源
     src/ui/ChatArea.h
     src/ui/ChatArea.cpp

@@ -3,6 +3,7 @@
 
 #include "Theme.h"
 #include "ui/ChatArea.h"
+#include "ui/ContactsPanel.h"
 #include "ui/SessionListPanel.h"
 #include "ui/SideBar.h"
 #include "model/ChatMessageRecord.h"
@@ -24,7 +25,7 @@
 #include <QVBoxLayout>
 #include <QWidget>
 
-// 初始化无边框窗口和三个页面：欢迎页、登录页、聊天工作台。
+// 初始化无边框主窗口和工作台页面。
 MainWindow::MainWindow(QWidget *parent)
     : QMainWindow(parent),
       m_pageStack(new QStackedWidget(this))
@@ -65,7 +66,7 @@ MainWindow::MainWindow(QWidget *parent)
     m_windowControls->raise();
 }
 
-// 将三个已实现的组件组合成工作台：导航栏 | 会话列表 | 当前聊天区域。
+// 组合工作台：左侧导航，右侧按需显示消息、联系人或功能占位页。
 QWidget *MainWindow::createChatWorkspacePage()
 {
     auto *page = new QWidget;
@@ -73,60 +74,131 @@ QWidget *MainWindow::createChatWorkspacePage()
     page->setAttribute(Qt::WA_TranslucentBackground);
     page->setStyleSheet(QStringLiteral("QWidget#chatWorkspacePage { background: transparent; }"));
 
-    // QSplitter 允许用户拖动会话列表与聊天区之间的分隔条。
-    auto *splitter = new QSplitter(Qt::Horizontal, page);
-    splitter->setObjectName(QStringLiteral("chatWorkspaceSplitter"));
-    splitter->setChildrenCollapsible(false);
-    // 三栏之间只保留 0px 的细间距，QSplitter 仍然可以拖动调整宽度。
-    splitter->setHandleWidth(0);
-    splitter->setOpaqueResize(true);
+    auto *rootLayout = new QHBoxLayout(page);
+    rootLayout->setContentsMargins(0, 0, 0, 0);
+    rootLayout->setSpacing(0);
 
-    auto *sideBar = new SideBar(splitter);
+    // 左侧导航栏保持常驻；右侧用页面栈切换消息区、联系人和暂未开放的区域。
+    m_sideBar = new SideBar(page);
+    SideBar *sideBar = m_sideBar;
     sideBar->setFixedWidth(Theme::NavigationWidth);
-
-    // 主窗口不直接处理退出登录，只把事件转发给 AppController。
     connect(sideBar, &SideBar::logoutRequested,
             this, &MainWindow::logoutRequested);
 
-    m_sessionPanel = new SessionListPanel(splitter);
+    m_workspaceStack = new QStackedWidget(page);
+    m_workspaceStack->setObjectName(QStringLiteral("workspaceStack"));
+    m_workspaceStack->setStyleSheet(QStringLiteral(
+        "QStackedWidget#workspaceStack { background: transparent; border: none; }"));
+
+    // 消息页内部仍使用可拖动的分隔条调整会话列表与聊天区宽度。
+    auto *messagesPage = new QWidget(m_workspaceStack);
+    messagesPage->setObjectName(QStringLiteral("messagesPage"));
+    auto *messageSplitter = new QSplitter(Qt::Horizontal, messagesPage);
+    messageSplitter->setObjectName(QStringLiteral("chatWorkspaceSplitter"));
+    messageSplitter->setChildrenCollapsible(false);
+    messageSplitter->setHandleWidth(0);
+    messageSplitter->setOpaqueResize(true);
+
+    m_sessionPanel = new SessionListPanel(messageSplitter);
     SessionListPanel *sessionPanel = m_sessionPanel;
-    // SessionListPanel 自己设置了 220–340px 的宽度范围；这里给它 240px 初始宽度。
     sessionPanel->resize(Theme::ConversationWidth, sessionPanel->height());
     connect(sessionPanel, &SessionListPanel::newSessionRequested,
             this, &MainWindow::newSessionRequested);
 
-    m_chatArea = new ChatArea(splitter);
+    m_chatArea = new ChatArea(messageSplitter);
     ChatArea *chatArea = m_chatArea;
-    chatArea->setConversationInfo(QStringLiteral("选择会话"), QString(), QStringLiteral("等待加载会话列表"));
+    chatArea->setConversationInfo(QStringLiteral("选择会话"), QString(),
+                                  QStringLiteral("等待加载会话列表"));
 
-    // 输入区只发出“用户想发送什么”；网络请求由 AppController 统一处理。
     connect(chatArea, &ChatArea::sendRequested, this,
             [this](const QString &text)
             {
-                emit messageSendRequested(
-                    text, m_currentConversationId, m_currentConversationIsGroup);
+                emit messageSendRequested(text, m_currentConversationId,
+                                          m_currentConversationIsGroup);
             });
     connect(chatArea, &ChatArea::historyRequested,
             this, &MainWindow::historyRequested);
     connect(chatArea, &ChatArea::retryMessageRequested,
             this, &MainWindow::messageRetryRequested);
 
-    splitter->addWidget(sideBar);
-    splitter->addWidget(sessionPanel);
-    splitter->addWidget(chatArea);
-    splitter->setStretchFactor(0, 0); // 导航栏固定宽度。
-    splitter->setStretchFactor(1, 0); // 会话列表可拖动，但不主动抢占剩余空间。
-    splitter->setStretchFactor(2, 1); // 窗口剩余宽度优先交给聊天区域。
-    splitter->setSizes({Theme::NavigationWidth, Theme::ConversationWidth, 900});
+    messageSplitter->addWidget(sessionPanel);
+    messageSplitter->addWidget(chatArea);
+    messageSplitter->setStretchFactor(0, 0);
+    messageSplitter->setStretchFactor(1, 1);
+    messageSplitter->setSizes({Theme::ConversationWidth, 900});
 
-    // 用外边距和间隔把三个区域分开，保留紫灰主题的呼吸感。
-    auto *layout = new QHBoxLayout(page);
-    // 整个窗口不留外框空隙，三栏工作台直接铺满客户区。
-    layout->setContentsMargins(0, 0, 0, 0);
-    layout->setSpacing(0);
-    layout->addWidget(splitter);
+    auto *messagesLayout = new QHBoxLayout(messagesPage);
+    messagesLayout->setContentsMargins(0, 0, 0, 0);
+    messagesLayout->setSpacing(0);
+    messagesLayout->addWidget(messageSplitter);
+    m_workspaceStack->addWidget(messagesPage);
 
-    // 点击真实会话时，把名称、会话类型和数据库 conversation_id 同步到聊天区。
+    // 联系人页只负责展示和发出操作请求；网络与数据解析仍归 AppController。
+    m_contactsPanel = new ContactsPanel(m_workspaceStack);
+    connect(m_contactsPanel, &ContactsPanel::refreshRequested,
+            this, &MainWindow::contactsRefreshRequested);
+    connect(m_contactsPanel, &ContactsPanel::sendFriendRequestRequested,
+            this, &MainWindow::friendRequestSendRequested);
+    connect(m_contactsPanel, &ContactsPanel::handleFriendRequestRequested,
+            this, &MainWindow::friendRequestHandleRequested);
+    connect(m_contactsPanel, &ContactsPanel::openPrivateChatRequested,
+            this, [this](quint64 userId)
+            {
+                // 从联系人直接发消息时，先切回消息工作区；会话创建成功后再选中真实会话。
+                if (m_sideBar != nullptr)
+                {
+                    m_sideBar->setCurrentSection(SideBar::Messages);
+                }
+                if (m_workspaceStack != nullptr)
+                {
+                    m_workspaceStack->setCurrentIndex(SideBar::Messages);
+                }
+                emit contactOpenPrivateChatRequested(userId);
+            });
+    m_workspaceStack->addWidget(m_contactsPanel);
+
+    // 收藏与文件尚未进入开发阶段，显示明确占位页，避免导航点击后看起来没有反应。
+    auto makePlaceholderPage = [this](const QString &titleText, const QString &descriptionText)
+    {
+        auto *placeholder = new QWidget(m_workspaceStack);
+        placeholder->setObjectName(QStringLiteral("featurePlaceholderPage"));
+        placeholder->setStyleSheet(QStringLiteral("QWidget#featurePlaceholderPage { background: rgba(252,251,255,238); }"));
+        auto *layout = new QVBoxLayout(placeholder);
+        layout->setContentsMargins(36, 38, 36, 30);
+        layout->setSpacing(10);
+        auto *title = new QLabel(titleText, placeholder);
+        title->setStyleSheet(QStringLiteral("color: #302A48; font-size: 23px; font-weight: 800;"));
+        auto *description = new QLabel(descriptionText, placeholder);
+        description->setWordWrap(true);
+        description->setStyleSheet(QStringLiteral("color: #8F87A8; font-size: 13px;"));
+        layout->addWidget(title);
+        layout->addWidget(description);
+        layout->addStretch(1);
+        return placeholder;
+    };
+    m_workspaceStack->addWidget(makePlaceholderPage(
+        QStringLiteral("收藏"), QStringLiteral("收藏功能暂未开放。当前阶段优先完善好友申请、好友列表和私聊入口。")));
+    m_workspaceStack->addWidget(makePlaceholderPage(
+        QStringLiteral("文件"), QStringLiteral("文件传输功能暂未开放；目前客户端支持文本消息和好友管理。")));
+
+    connect(sideBar, &SideBar::sectionChanged, this,
+            [this](int section)
+            {
+                if (m_workspaceStack == nullptr)
+                {
+                    return;
+                }
+                m_workspaceStack->setCurrentIndex(section);
+                if (section == SideBar::Contacts)
+                {
+                    emit contactsRefreshRequested();
+                }
+            });
+
+    rootLayout->addWidget(sideBar);
+    rootLayout->addWidget(m_workspaceStack, 1);
+
+    // 点击真实会话时同步标题、类型与数据库 conversation_id，并加载最新一页历史消息。
     connect(sessionPanel, &SessionListPanel::sessionActivated, this,
             [this, sessionPanel, chatArea](const QString &sessionId)
             {
@@ -139,11 +211,9 @@ QWidget *MainWindow::createChatWorkspacePage()
                         m_currentConversationId = session->conversationId;
                         m_currentConversationIsGroup = session->group;
                         chatArea->setConversationInfo(
-                            session->name,
-                            session->avatarText,
+                            session->name, session->avatarText,
                             session->group ? QStringLiteral("群聊") : QStringLiteral("私聊"));
                         chatArea->setCurrentConversationId(m_currentConversationId);
-                        // 切换到真实会话时自动加载最新一页历史消息。
                         if (m_currentConversationId > 0)
                         {
                             emit historyRequested(m_currentConversationId);
@@ -152,7 +222,6 @@ QWidget *MainWindow::createChatWorkspacePage()
                     }
                 }
             });
-
 
     return page;
 }
@@ -187,6 +256,14 @@ bool MainWindow::appendMessage(const ChatMessageRecord &message)
     return m_chatArea != nullptr && m_chatArea->appendMessage(message);
 }
 
+int MainWindow::appendHistoryMessages(quint64 conversationId,
+                                      const QVector<ChatMessageRecord> &messages)
+{
+    return m_chatArea != nullptr
+        ? m_chatArea->appendHistoryMessages(conversationId, messages)
+        : 0;
+}
+
 bool MainWindow::setMessageSendState(const QString &clientMessageId, MessageSendState state)
 {
     return m_chatArea != nullptr &&
@@ -214,6 +291,50 @@ void MainWindow::clearMessageInput()
     if (m_chatArea != nullptr)
     {
         m_chatArea->clearMessageInput();
+    }
+}
+
+void MainWindow::setContacts(const QVector<ContactItem> &contacts)
+{
+    if (m_contactsPanel != nullptr)
+    {
+        m_contactsPanel->setFriends(contacts);
+    }
+}
+
+void MainWindow::setPendingFriendRequests(const QVector<PendingFriendRequestItem> &requests)
+{
+    if (m_contactsPanel != nullptr)
+    {
+        m_contactsPanel->setPendingRequests(requests);
+    }
+}
+
+void MainWindow::setContactsStatus(const QString &message, bool isError)
+{
+    if (m_contactsPanel != nullptr)
+    {
+        m_contactsPanel->setStatus(message, isError);
+    }
+}
+
+void MainWindow::showMessagesPage()
+{
+    if (m_sideBar != nullptr)
+    {
+        m_sideBar->setCurrentSection(SideBar::Messages);
+    }
+    if (m_workspaceStack != nullptr)
+    {
+        m_workspaceStack->setCurrentIndex(SideBar::Messages);
+    }
+}
+
+void MainWindow::finishAddFriendRequest(bool clearInput)
+{
+    if (m_contactsPanel != nullptr)
+    {
+        m_contactsPanel->finishAddFriendRequest(clearInput);
     }
 }
 

@@ -19,6 +19,8 @@
 #include <QApplication>
 #include <QStyle>
 #include <QStyleOptionViewItem>
+#include <QScrollBar>
+#include <QTimer>
 
 // ---------------------------- SessionListModel ----------------------------
 
@@ -390,8 +392,11 @@ void SessionListPanel::setupUi()
 
 void SessionListPanel::setupConnections()
 {
-    connect(m_searchEdit, &QLineEdit::textChanged,
-            m_proxyModel, &SessionFilterProxyModel::setSearchText);
+    connect(m_searchEdit, &QLineEdit::textChanged, this, [this](const QString &text)
+    {
+        m_proxyModel->setSearchText(text);
+        restoreActiveSelectionIfVisible();
+    });
 
     connect(m_filterGroup, QOverload<int>::of(&QButtonGroup::idClicked), this,
             [this](int id) {
@@ -422,16 +427,40 @@ QPushButton *SessionListPanel::createFilterButton(const QString &text, const QSt
 void SessionListPanel::setActiveFilter(SessionFilterProxyModel::Filter filter)
 {
     m_proxyModel->setFilter(filter);
-    // 切换筛选后，若当前索引无效则自动选中首条可见会话。
-    if (!m_listView->currentIndex().isValid() && m_proxyModel->rowCount() > 0)
-        m_listView->setCurrentIndex(m_proxyModel->index(0, 0));
+    // 筛选只影响左侧可见条目，不应隐式切换右侧正在聊天的会话。
+    restoreActiveSelectionIfVisible();
+}
+
+void SessionListPanel::restoreActiveSelectionIfVisible()
+{
+    if (m_selectedSessionId.isEmpty())
+    {
+        m_listView->setCurrentIndex(QModelIndex());
+        return;
+    }
+
+    QModelIndex sourceIndex;
+    for (int row = 0; row < m_sourceModel->rowCount(); ++row)
+    {
+        const SessionItem *item = m_sourceModel->sessionAt(row);
+        if (item != nullptr && item->id == m_selectedSessionId)
+        {
+            sourceIndex = m_sourceModel->index(row, 0);
+            break;
+        }
+    }
+
+    const QModelIndex proxyIndex = sourceIndex.isValid()
+        ? m_proxyModel->mapFromSource(sourceIndex) : QModelIndex();
+    // 当前会话在筛选结果中就恢复选中；被筛选隐藏时清掉视觉选中，但保留真实会话 ID。
+    m_listView->setCurrentIndex(proxyIndex);
 }
 
 void SessionListPanel::setSessions(const QVector<SessionItem> &sessions,
                                    quint64 preferredConversationId)
 {
-    // 优先打开调用方指定的会话；否则尽可能保留用户当前选中的会话。
     const QString oldSelectedId = m_selectedSessionId;
+    const int oldScrollValue = m_listView->verticalScrollBar()->value();
     m_sourceModel->setSessions(sessions);
 
     if (sessions.isEmpty())
@@ -445,28 +474,54 @@ void SessionListPanel::setSessions(const QVector<SessionItem> &sessions,
         return;
     }
 
-    const QString preferredId = preferredConversationId > 0
-                                    ? QString::number(preferredConversationId)
-                                    : oldSelectedId;
-    if (!preferredId.isEmpty())
+    // 只有调用方明确指定新会话时才强制显示它，并允许清除当前搜索/筛选条件。
+    if (preferredConversationId > 0)
     {
         bool exists = false;
         for (int row = 0; row < m_sourceModel->rowCount(); ++row)
         {
             const SessionItem *item = m_sourceModel->sessionAt(row);
-            if (item != nullptr && item->id == preferredId)
+            if (item != nullptr && item->id == QString::number(preferredConversationId))
             {
                 exists = true;
                 break;
             }
         }
-        if (exists && selectConversationById(preferredId.toULongLong()))
+        if (exists && selectConversationById(preferredConversationId))
         {
             return;
         }
     }
 
-    // 当前会话已不存在（例如刚退出一个账号），选中首条真实会话。
+    // 服务端会话摘要刷新会重置模型；先尽量保留原活动会话，但不强行重置搜索/筛选。
+    if (!oldSelectedId.isEmpty())
+    {
+        bool stillExists = false;
+        QModelIndex sourceIndex;
+        for (int row = 0; row < m_sourceModel->rowCount(); ++row)
+        {
+            const SessionItem *item = m_sourceModel->sessionAt(row);
+            if (item != nullptr && item->id == oldSelectedId)
+            {
+                stillExists = true;
+                sourceIndex = m_sourceModel->index(row, 0);
+                break;
+            }
+        }
+        if (stillExists)
+        {
+            m_selectedSessionId = oldSelectedId;
+            m_listView->setCurrentIndex(m_proxyModel->mapFromSource(sourceIndex));
+            // 如果活动会话被当前搜索/筛选隐藏，mapFromSource 返回无效索引；仍保留活动会话 ID。
+            QTimer::singleShot(0, this, [this, oldScrollValue]()
+            {
+                m_listView->verticalScrollBar()->setValue(oldScrollValue);
+            });
+            return;
+        }
+    }
+
+    // 首次收到会话或原会话已不存在时，才选择首条可见会话并发出切换信号。
     if (m_proxyModel->rowCount() > 0)
     {
         const QModelIndex first = m_proxyModel->index(0, 0);
@@ -483,6 +538,11 @@ void SessionListPanel::setSessions(const QVector<SessionItem> &sessions,
         m_selectedSessionId.clear();
         m_listView->setCurrentIndex(QModelIndex());
     }
+
+    QTimer::singleShot(0, this, [this, oldScrollValue]()
+    {
+        m_listView->verticalScrollBar()->setValue(oldScrollValue);
+    });
 }
 
 bool SessionListPanel::selectConversationById(quint64 conversationId)

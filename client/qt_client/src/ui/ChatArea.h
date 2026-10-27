@@ -3,6 +3,7 @@
 #include <QWidget>
 #include <QString>
 #include <QtGlobal>
+#include <QVector>
 
 #include "model/ChatMessageRecord.h"
 
@@ -47,6 +48,9 @@ public:
     void setCurrentUsername(const QString &username);
     // 将服务器确认保存的消息写入模型；相同 server_msg_id 会被自动去重。
     bool appendMessage(const ChatMessageRecord &message);
+    // 批量插入一页历史消息；若用户正在阅读较早内容，尽量保持当前视口位置。
+    int appendHistoryMessages(quint64 conversationId,
+                              const QVector<ChatMessageRecord> &messages);
     bool setMessageSendState(const QString &clientMessageId, MessageSendState state);
     bool confirmPendingMessage(const QString &clientMessageId,
                               quint64 serverMessageId, quint64 sequence);
@@ -65,6 +69,10 @@ protected:
     void resizeEvent(QResizeEvent *event) override;
 
 private:
+    // 判断用户是否已经接近消息列表底部；只有这种情况下新消息才自动跟随滚动。
+    bool isNearBottom() const;
+    void scrollToBottom();
+
     QLabel *m_avatarLabel = nullptr;
     QLabel *m_nameLabel = nullptr;
     QLabel *m_statusLabel = nullptr;

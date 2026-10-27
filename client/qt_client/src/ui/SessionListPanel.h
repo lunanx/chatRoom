@@ -131,6 +131,8 @@ private:
     void setupConnections();
     QPushButton *createFilterButton(const QString &text, const QString &objectName);
     void setActiveFilter(SessionFilterProxyModel::Filter filter);
+    // 搜索/筛选改变时，只恢复当前会话的视觉选中状态，不自动切换聊天会话。
+    void restoreActiveSelectionIfVisible();
 
     QLineEdit *m_searchEdit = nullptr;
     QListView *m_listView = nullptr;

@@ -8,6 +8,7 @@
 #include <QString>
 #include <QVector>
 #include "ui/SessionListPanel.h"
+#include "ui/ContactsPanel.h"
 #include "model/ChatMessageRecord.h"
 
 class QEvent;
@@ -17,6 +18,7 @@ class QResizeEvent;
 class QStackedWidget;
 class QWidget;
 class ChatArea;
+class SideBar;
 
 // 客户端主窗口：展示三栏聊天工作台，并统一矩形窗口与窗口控制按钮。
 class MainWindow : public QMainWindow
@@ -36,6 +38,9 @@ public:
     void setCurrentUsername(const QString &username);
     // 将服务端推送的消息交给聊天区模型；返回 false 表示重复或无效消息。
     bool appendMessage(const ChatMessageRecord &message);
+    // 批量插入一页历史消息，聊天区统一处理滚动位置。
+    int appendHistoryMessages(quint64 conversationId,
+                              const QVector<ChatMessageRecord> &messages);
     bool setMessageSendState(const QString &clientMessageId, MessageSendState state);
     bool confirmPendingMessage(const QString &clientMessageId,
                               quint64 serverMessageId, quint64 sequence);
@@ -45,11 +50,21 @@ public:
     // 用服务端返回的数据替换左侧会话列表；preferredConversationId 用于新建会话后自动打开它。
     void setSessions(const QVector<SessionItem> &sessions, quint64 preferredConversationId = 0);
     void clearSessions();
+    void setContacts(const QVector<ContactItem> &contacts);
+    void setPendingFriendRequests(const QVector<PendingFriendRequestItem> &requests);
+    void setContactsStatus(const QString &message, bool isError = false);
+    void finishAddFriendRequest(bool clearInput);
+    // 从联系人操作后切回消息工作区，例如同意好友申请后自动打开私聊。
+    void showMessagesPage();
 
 signals:
     // 用户从侧边栏“更多”菜单中选择退出登录时发出。
     void logoutRequested();
     void newSessionRequested();
+    void contactsRefreshRequested();
+    void friendRequestSendRequested(const QString &username);
+    void friendRequestHandleRequested(quint64 requestId, quint64 senderUserId, int action);
+    void contactOpenPrivateChatRequested(quint64 userId);
 
     // 输入区请求发送文本；会话 ID 与类型来自当前选中的会话。
     void messageSendRequested(const QString &text, quint64 conversationId, bool isGroup);
@@ -79,6 +94,9 @@ private:
     void updateResizeCursor(QWidget *watched, const QPoint &globalPosition);
 
     QStackedWidget *m_pageStack = nullptr; // 页面栈，只显示当前页面。
+    QStackedWidget *m_workspaceStack = nullptr; // 消息、联系人和暂未开放页面的切换栈。
+    SideBar *m_sideBar = nullptr; // 当前导航状态由主窗口统一协调。
+    ContactsPanel *m_contactsPanel = nullptr; // 好友列表、好友申请和添加好友界面。
     QWidget *m_windowControls = nullptr;   // 右上角与背景融合的圆点控制按钮。
     QPoint m_dragOffset;              // 鼠标按下位置相对窗口左上角的偏移量。
     bool m_dragging = false;          // 当前是否正在拖动窗口。

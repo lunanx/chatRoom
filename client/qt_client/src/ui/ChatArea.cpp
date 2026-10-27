@@ -19,6 +19,8 @@
 #include <QWidget>
 #include <QDebug>
 #include <QTimer>
+#include <QScrollBar>
+#include <QPersistentModelIndex>
 
 namespace
 {
@@ -357,22 +359,117 @@ void ChatArea::clearMessages()
 
 bool ChatArea::appendMessage(const ChatMessageRecord &message)
 {
-    const bool inserted = m_messageModel->appendMessage(message);
-    if (inserted && message.conversationId == m_currentConversationId)
+    // 在插入前判断是否贴近底部；如果用户正在向上阅读，收到他人消息时不强行跳到底部。
+    // 自己刚发送的 Pending 气泡则始终滚到末尾，避免发送后看不到刚发出的消息。
+    const bool shouldFollow = message.conversationId == m_currentConversationId &&
+        (message.sendState == MessageSendState::Pending || isNearBottom());
+    const quint64 conversationId = message.conversationId;
+    const bool inserted = m_messageModel != nullptr && m_messageModel->appendMessage(message);
+
+    if (inserted && shouldFollow)
     {
-        // 等模型与代理视图完成布局后再滚动，确保新插入的消息出现在底部。
-        QTimer::singleShot(0, this, [this]()
+        QTimer::singleShot(0, this, [this, conversationId]()
         {
-            const int lastRow = m_messageFilterModel->rowCount() - 1;
-            if (lastRow >= 0)
+            if (m_currentConversationId == conversationId)
             {
-                m_messageListView->scrollTo(
-                    m_messageFilterModel->index(lastRow, 0),
-                    QAbstractItemView::PositionAtBottom);
+                scrollToBottom();
             }
         });
     }
     return inserted;
+}
+
+int ChatArea::appendHistoryMessages(quint64 conversationId,
+                                    const QVector<ChatMessageRecord> &messages)
+{
+    if (m_messageModel == nullptr || conversationId == 0 || messages.isEmpty())
+    {
+        return 0;
+    }
+
+    const bool affectsCurrentView = conversationId == m_currentConversationId;
+    const int previousVisibleRows = affectsCurrentView ? m_messageFilterModel->rowCount() : 0;
+    const bool wasNearBottom = affectsCurrentView && isNearBottom();
+    QScrollBar *scrollBar = m_messageListView->verticalScrollBar();
+    const int oldScrollValue = scrollBar != nullptr ? scrollBar->value() : 0;
+
+    // 当用户不在底部时，记录最上方可见消息及它相对 viewport 的 Y 坐标。
+    // 历史消息插入到它前面后，用这个锚点把视口恢复到原来的内容位置。
+    QPersistentModelIndex anchorIndex;
+    int anchorTop = 0;
+    if (affectsCurrentView && previousVisibleRows > 0 && !wasNearBottom)
+    {
+        const QRect viewportRect = m_messageListView->viewport()->rect();
+        for (int row = 0; row < previousVisibleRows; ++row)
+        {
+            const QModelIndex candidate = m_messageFilterModel->index(row, 0);
+            const QRect itemRect = m_messageListView->visualRect(candidate);
+            if (itemRect.isValid() && itemRect.intersects(viewportRect))
+            {
+                anchorIndex = QPersistentModelIndex(candidate);
+                anchorTop = itemRect.top();
+                break;
+            }
+        }
+    }
+
+    int insertedCount = 0;
+    for (const ChatMessageRecord &message : messages)
+    {
+        // 防御性校验：批量历史数据不能误插入到其他会话。
+        if (message.conversationId != conversationId)
+        {
+            continue;
+        }
+        if (m_messageModel->appendMessage(message))
+        {
+            ++insertedCount;
+        }
+    }
+
+    if (insertedCount == 0 || !affectsCurrentView)
+    {
+        return insertedCount;
+    }
+
+    QTimer::singleShot(0, this,
+        [this, conversationId, previousVisibleRows, wasNearBottom,
+         anchorIndex, anchorTop, oldScrollValue]()
+        {
+            if (m_currentConversationId != conversationId)
+            {
+                return;
+            }
+
+            // 首次加载历史时，直接定位到最新一条；若原本在底部，则继续保持底部。
+            if (previousVisibleRows == 0 || wasNearBottom)
+            {
+                scrollToBottom();
+                return;
+            }
+
+            QScrollBar *bar = m_messageListView->verticalScrollBar();
+            if (bar == nullptr)
+            {
+                return;
+            }
+
+            if (anchorIndex.isValid())
+            {
+                const QRect restoredRect = m_messageListView->visualRect(QModelIndex(anchorIndex));
+                if (restoredRect.isValid())
+                {
+                    // itemRect.top() 是 viewport 坐标，差值即需要补偿的滚动像素。
+                    bar->setValue(bar->value() + restoredRect.top() - anchorTop);
+                    return;
+                }
+            }
+
+            // 极少数情况下锚点因过滤/重排失效，退回原滚动条数值。
+            bar->setValue(oldScrollValue);
+        });
+
+    return insertedCount;
 }
 
 bool ChatArea::setMessageSendState(const QString &clientMessageId, MessageSendState state)
@@ -385,25 +482,63 @@ bool ChatArea::confirmPendingMessage(const QString &clientMessageId,
                                      quint64 serverMessageId,
                                      quint64 sequence)
 {
+    const bool wasNearBottom = isNearBottom();
+    QScrollBar *scrollBar = m_messageListView->verticalScrollBar();
+    const int oldScrollValue = scrollBar != nullptr ? scrollBar->value() : 0;
+    QPersistentModelIndex anchorIndex;
+    int anchorTop = 0;
+
+    // 确认响应可能令 Pending 消息按服务端 seq 重新排序。
+    // 用户若已向上翻阅，不应因为 ACK 到达而跳到最底部。
+    if (!wasNearBottom)
+    {
+        const QRect viewportRect = m_messageListView->viewport()->rect();
+        for (int row = 0; row < m_messageFilterModel->rowCount(); ++row)
+        {
+            const QModelIndex candidate = m_messageFilterModel->index(row, 0);
+            const QRect itemRect = m_messageListView->visualRect(candidate);
+            if (itemRect.isValid() && itemRect.intersects(viewportRect))
+            {
+                anchorIndex = QPersistentModelIndex(candidate);
+                anchorTop = itemRect.top();
+                break;
+            }
+        }
+    }
+
     const bool confirmed = m_messageModel != nullptr &&
         m_messageModel->confirmPendingMessage(clientMessageId, serverMessageId, sequence);
     if (confirmed)
     {
-        // ACK 可能把待确认项重新插入历史序号中的正确位置，布局结束后再定位到底部。
-        QTimer::singleShot(0, this, [this]()
-        {
-            if (m_currentConversationId == 0)
+        QTimer::singleShot(0, this,
+            [this, wasNearBottom, anchorIndex, anchorTop, oldScrollValue]()
             {
-                return;
-            }
-            const int lastRow = m_messageFilterModel->rowCount() - 1;
-            if (lastRow >= 0)
-            {
-                m_messageListView->scrollTo(
-                    m_messageFilterModel->index(lastRow, 0),
-                    QAbstractItemView::PositionAtBottom);
-            }
-        });
+                if (m_currentConversationId == 0)
+                {
+                    return;
+                }
+                if (wasNearBottom)
+                {
+                    scrollToBottom();
+                    return;
+                }
+
+                QScrollBar *bar = m_messageListView->verticalScrollBar();
+                if (bar == nullptr)
+                {
+                    return;
+                }
+                if (anchorIndex.isValid())
+                {
+                    const QRect rect = m_messageListView->visualRect(QModelIndex(anchorIndex));
+                    if (rect.isValid())
+                    {
+                        bar->setValue(bar->value() + rect.top() - anchorTop);
+                        return;
+                    }
+                }
+                bar->setValue(oldScrollValue);
+            });
     }
     return confirmed;
 }
@@ -414,5 +549,36 @@ void ChatArea::setHistoryLoading(bool loading, bool hasMore)
     if (m_inputBar != nullptr)
     {
         m_inputBar->setHistoryLoading(loading, hasMore, m_currentConversationId != 0);
+    }
+}
+
+bool ChatArea::isNearBottom() const
+{
+    if (m_messageListView == nullptr)
+    {
+        return true;
+    }
+    const QScrollBar *bar = m_messageListView->verticalScrollBar();
+    if (bar == nullptr)
+    {
+        return true;
+    }
+
+    // 24px 容差用于吸收气泡重新布局和字体度量带来的轻微滚动误差。
+    return bar->maximum() - bar->value() <= 24;
+}
+
+void ChatArea::scrollToBottom()
+{
+    if (m_messageListView == nullptr || m_messageFilterModel == nullptr)
+    {
+        return;
+    }
+    const int lastRow = m_messageFilterModel->rowCount() - 1;
+    if (lastRow >= 0)
+    {
+        m_messageListView->scrollTo(
+            m_messageFilterModel->index(lastRow, 0),
+            QAbstractItemView::PositionAtBottom);
     }
 }
