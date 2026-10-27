@@ -19,6 +19,8 @@
 #include "Theme.h"
 #include "ui/SessionListPanel.h"
 #include <QDateTime>
+#include <QGraphicsDropShadowEffect>
+#include <QFrame>
 #include <QDebug>
 #include <QJsonDocument>
 #include <QJsonArray>
@@ -26,6 +28,7 @@
 #include <QJsonValue>
 #include <QSettings>
 #include <QWidget>
+#include <QVector>
 #include <QUuid>
 
 namespace
@@ -492,6 +495,36 @@ void AppController::onPacketReceived(quint16 command,
             m_friendListRequestId = 0;
         }
         handleFriendListResponse(responseCommand, jsonBody);
+        return;
+    }
+
+    if (originalCommand == protocolHeader::CommandType::QUERY_PENDING_FRIEND_LIST_REQUEST)
+    {
+        if (m_pendingFriendListRequestId == requestId)
+        {
+            m_pendingFriendListRequestId = 0;
+        }
+        handlePendingFriendListResponse(responseCommand, jsonBody);
+        return;
+    }
+
+    if (originalCommand == protocolHeader::CommandType::FRIEND_REQUEST_SEND)
+    {
+        if (m_sendFriendRequestId == requestId)
+        {
+            m_sendFriendRequestId = 0;
+        }
+        handleFriendRequestSendResponse(responseCommand, jsonBody);
+        return;
+    }
+
+    if (originalCommand == protocolHeader::CommandType::FRIEND_REQUEST_HANDLE_REQUEST)
+    {
+        if (m_handleFriendRequestId == requestId)
+        {
+            m_handleFriendRequestId = 0;
+        }
+        handleFriendRequestHandleResponse(responseCommand, jsonBody);
         return;
     }
 
@@ -1030,6 +1063,9 @@ quint64 AppController::sendOperationRequest(protocolHeader::CommandType command,
         }
 
         stopOperationRequestTimer(requestId);
+        const bool friendListWasForNewSession =
+            command == protocolHeader::CommandType::QUERY_FRIEND_LIST_REQUEST &&
+            m_friendListRequestForNewSession;
         switch (command)
         {
         case protocolHeader::CommandType::QUERY_CONVERSATION_LIST_REQUEST:
@@ -1044,6 +1080,27 @@ quint64 AppController::sendOperationRequest(protocolHeader::CommandType command,
             if (m_friendListRequestId == requestId)
             {
                 m_friendListRequestId = 0;
+            }
+            m_friendListRequestForNewSession = false;
+            break;
+        case protocolHeader::CommandType::QUERY_PENDING_FRIEND_LIST_REQUEST:
+            if (m_pendingFriendListRequestId == requestId)
+            {
+                m_pendingFriendListRequestId = 0;
+            }
+            break;
+        case protocolHeader::CommandType::FRIEND_REQUEST_SEND:
+            if (m_sendFriendRequestId == requestId)
+            {
+                m_sendFriendRequestId = 0;
+            }
+            break;
+        case protocolHeader::CommandType::FRIEND_REQUEST_HANDLE_REQUEST:
+            if (m_handleFriendRequestId == requestId)
+            {
+                m_handleFriendRequestId = 0;
+                m_pendingHandledFriendUserId = 0;
+                m_pendingFriendRequestAction = 0;
             }
             break;
         case protocolHeader::CommandType::CHATCREATE_REQUEST:
@@ -1066,6 +1123,28 @@ quint64 AppController::sendOperationRequest(protocolHeader::CommandType command,
             else if (command == protocolHeader::CommandType::QUERY_FRIEND_LIST_REQUEST)
             {
                 status = QStringLiteral("好友列表加载超时，请重试");
+                m_mainWindow->setContactsStatus(status, true);
+                if (friendListWasForNewSession)
+                {
+                    m_mainWindow->setMessageStatus(status, true);
+                }
+                m_friendListRequestForNewSession = false;
+            }
+            else if (command == protocolHeader::CommandType::QUERY_PENDING_FRIEND_LIST_REQUEST)
+            {
+                status = QStringLiteral("收到的好友申请加载超时，请重试");
+                m_mainWindow->setContactsStatus(status, true);
+            }
+            else if (command == protocolHeader::CommandType::FRIEND_REQUEST_SEND)
+            {
+                status = QStringLiteral("发送好友申请超时，请刷新后确认状态");
+                m_mainWindow->finishAddFriendRequest(false);
+                m_mainWindow->setContactsStatus(status, true);
+            }
+            else if (command == protocolHeader::CommandType::FRIEND_REQUEST_HANDLE_REQUEST)
+            {
+                status = QStringLiteral("处理好友申请超时，请刷新列表确认状态");
+                m_mainWindow->setContactsStatus(status, true);
             }
             else if (command == protocolHeader::CommandType::CHATCREATE_REQUEST)
             {
@@ -1102,9 +1181,15 @@ void AppController::clearOperationRequestTimers()
     }
     m_conversationListRequestId = 0;
     m_friendListRequestId = 0;
+    m_pendingFriendListRequestId = 0;
+    m_sendFriendRequestId = 0;
+    m_handleFriendRequestId = 0;
+    m_pendingHandledFriendUserId = 0;
+    m_pendingFriendRequestAction = 0;
     m_createConversationRequestId = 0;
     m_pendingConversationSelectionId = 0;
     m_conversationListRefreshPending = false;
+    m_friendListRequestForNewSession = false;
 }
 
 void AppController::requestConversationList()
@@ -1303,12 +1388,190 @@ void AppController::onNewSessionRequested()
         return;
     }
 
+    m_friendListRequestForNewSession = true;
     const quint64 requestId = sendOperationRequest(
         protocolHeader::CommandType::QUERY_FRIEND_LIST_REQUEST, QJsonObject{});
     if (requestId != 0)
     {
         m_friendListRequestId = requestId;
         m_mainWindow->setMessageStatus(QStringLiteral("正在加载好友列表…"), false);
+    }
+    else
+    {
+        m_friendListRequestForNewSession = false;
+    }
+}
+
+void AppController::onContactsRefreshRequested()
+{
+    if (!m_isAuthenticated || m_isLoggingOut || m_mainWindow == nullptr)
+    {
+        return;
+    }
+    if (!m_tcpClient->isConnected())
+    {
+        m_mainWindow->setContactsStatus(QStringLiteral("连接已断开，请重新登录后刷新联系人。"), true);
+        return;
+    }
+
+    m_mainWindow->setContactsStatus(QStringLiteral("正在从服务器刷新好友和收到的申请…"), false);
+    if (m_friendListRequestId != 0)
+    {
+        m_friendListRequestForNewSession = false;
+    }
+    requestFriendListForContacts();
+    requestPendingFriendRequests();
+}
+
+void AppController::requestFriendListForContacts()
+{
+    if (m_friendListRequestId != 0 || !m_isAuthenticated || m_mainWindow == nullptr)
+    {
+        return;
+    }
+
+    m_friendListRequestForNewSession = false;
+    const quint64 requestId = sendOperationRequest(
+        protocolHeader::CommandType::QUERY_FRIEND_LIST_REQUEST, QJsonObject{});
+    if (requestId != 0)
+    {
+        m_friendListRequestId = requestId;
+    }
+    else
+    {
+        m_mainWindow->setContactsStatus(
+            QStringLiteral("无法发送好友列表查询请求，请检查连接后重试。"), true);
+    }
+}
+
+void AppController::requestPendingFriendRequests()
+{
+    if (m_pendingFriendListRequestId != 0 || !m_isAuthenticated || m_mainWindow == nullptr)
+    {
+        return;
+    }
+
+    const quint64 requestId = sendOperationRequest(
+        protocolHeader::CommandType::QUERY_PENDING_FRIEND_LIST_REQUEST, QJsonObject{});
+    if (requestId != 0)
+    {
+        m_pendingFriendListRequestId = requestId;
+    }
+    else
+    {
+        m_mainWindow->setContactsStatus(
+            QStringLiteral("无法发送好友申请列表查询请求，请检查连接后重试。"), true);
+    }
+}
+
+void AppController::onFriendRequestSendRequested(const QString &username)
+{
+    if (!m_isAuthenticated || m_isLoggingOut || m_mainWindow == nullptr)
+    {
+        if (m_mainWindow != nullptr)
+        {
+            m_mainWindow->finishAddFriendRequest(false);
+            m_mainWindow->setContactsStatus(QStringLiteral("请先登录后再添加好友。"), true);
+        }
+        return;
+    }
+    if (m_sendFriendRequestId != 0)
+    {
+        m_mainWindow->finishAddFriendRequest(false);
+        m_mainWindow->setContactsStatus(QStringLiteral("上一条好友申请仍在处理中，请稍候。"), false);
+        return;
+    }
+
+    QJsonObject body;
+    body.insert(QString::fromLatin1(protocolBody::TARGET_USERNAME), username.trimmed());
+    const quint64 requestId = sendOperationRequest(
+        protocolHeader::CommandType::FRIEND_REQUEST_SEND, body);
+    if (requestId != 0)
+    {
+        m_sendFriendRequestId = requestId;
+        m_mainWindow->setContactsStatus(QStringLiteral("正在发送好友申请…"), false);
+    }
+    else
+    {
+        m_mainWindow->finishAddFriendRequest(false);
+        m_mainWindow->setContactsStatus(
+            QStringLiteral("好友申请未发送，请检查连接后重试。"), true);
+    }
+}
+
+void AppController::onFriendRequestHandleRequested(quint64 requestId,
+                                                   quint64 senderUserId,
+                                                   int action)
+{
+    if (!m_isAuthenticated || m_isLoggingOut || m_mainWindow == nullptr)
+    {
+        return;
+    }
+    if (requestId == 0 || senderUserId == 0 || (action != 1 && action != 2))
+    {
+        m_mainWindow->setContactsStatus(QStringLiteral("好友申请参数无效，未发送请求。"), true);
+        return;
+    }
+    if (m_handleFriendRequestId != 0)
+    {
+        m_mainWindow->setContactsStatus(QStringLiteral("正在处理另一条好友申请，请稍候。"), false);
+        return;
+    }
+
+    QJsonObject body;
+    body.insert(QString::fromLatin1(protocolBody::FRIEND_REQUEST_ID),
+                QJsonValue(static_cast<qint64>(requestId)));
+    body.insert(QString::fromLatin1(protocolBody::ACTION), action);
+    const quint64 networkRequestId = sendOperationRequest(
+        protocolHeader::CommandType::FRIEND_REQUEST_HANDLE_REQUEST, body);
+    if (networkRequestId != 0)
+    {
+        m_handleFriendRequestId = networkRequestId;
+        m_pendingHandledFriendUserId = senderUserId;
+        m_pendingFriendRequestAction = action;
+        m_mainWindow->setContactsStatus(
+            action == 1 ? QStringLiteral("正在同意好友申请…") : QStringLiteral("正在拒绝好友申请…"), false);
+    }
+    else
+    {
+        m_mainWindow->setContactsStatus(
+            QStringLiteral("未能发送好友申请处理请求，请检查连接后重试。"), true);
+    }
+}
+
+void AppController::onContactOpenPrivateChatRequested(quint64 userId)
+{
+    openPrivateConversation(userId);
+}
+
+void AppController::openPrivateConversation(quint64 targetUserId)
+{
+    if (!m_isAuthenticated || m_isLoggingOut || m_mainWindow == nullptr)
+    {
+        return;
+    }
+    if (targetUserId == 0)
+    {
+        m_mainWindow->setContactsStatus(QStringLiteral("所选好友 ID 无效，无法创建会话。"), true);
+        return;
+    }
+    if (m_createConversationRequestId != 0)
+    {
+        m_mainWindow->setContactsStatus(QStringLiteral("正在打开另一条会话，请稍候。"), false);
+        return;
+    }
+
+    QJsonObject body;
+    body.insert(QString::fromLatin1(protocolBody::TYPE), 1); // 1=私聊。
+    body.insert(QString::fromLatin1(protocolBody::TARGET_USER_ID),
+                QJsonValue(static_cast<qint64>(targetUserId)));
+    const quint64 requestId = sendOperationRequest(
+        protocolHeader::CommandType::CHATCREATE_REQUEST, body);
+    if (requestId != 0)
+    {
+        m_createConversationRequestId = requestId;
+        m_mainWindow->setContactsStatus(QStringLiteral("正在打开私聊会话…"), false);
+        m_mainWindow->setMessageStatus(QStringLiteral("正在打开私聊会话…"), false);
     }
 }
 
@@ -1320,10 +1583,18 @@ void AppController::handleFriendListResponse(
     {
         return;
     }
+    const bool forNewSession = m_friendListRequestForNewSession;
+    m_friendListRequestForNewSession = false;
+
     if (responseCommand != protocolHeader::CommandType::QUERY_FRIEND_LIST_SUCCESS &&
         responseCommand != protocolHeader::CommandType::QUERY_FRIEND_LIST_FAILED)
     {
-        m_mainWindow->setMessageStatus(QStringLiteral("服务器返回了无法识别的好友列表响应"), true);
+        const QString message = QStringLiteral("服务器返回了无法识别的好友列表响应");
+        m_mainWindow->setContactsStatus(message, true);
+        if (forNewSession)
+        {
+            m_mainWindow->setMessageStatus(message, true);
+        }
         return;
     }
 
@@ -1331,25 +1602,221 @@ void AppController::handleFriendListResponse(
     const QJsonDocument document = QJsonDocument::fromJson(jsonBody, &parseError);
     if (parseError.error != QJsonParseError::NoError || !document.isObject())
     {
-        m_mainWindow->setMessageStatus(QStringLiteral("无法解析服务器返回的好友列表"), true);
+        const QString message = QStringLiteral("无法解析服务器返回的好友列表");
+        m_mainWindow->setContactsStatus(message, true);
+        if (forNewSession)
+        {
+            m_mainWindow->setMessageStatus(message, true);
+        }
         return;
     }
+
     const QJsonObject body = document.object();
     const QString serverMessage = body.value(QString::fromLatin1(protocolBody::MESSAGE))
                                       .toString(QStringLiteral("好友列表请求已完成"));
     if (responseCommand == protocolHeader::CommandType::QUERY_FRIEND_LIST_FAILED)
     {
-        m_mainWindow->setMessageStatus(serverMessage, true);
+        m_mainWindow->setContactsStatus(serverMessage, true);
+        if (forNewSession)
+        {
+            m_mainWindow->setMessageStatus(serverMessage, true);
+        }
         return;
     }
 
     const QJsonValue dataValue = body.value(QString::fromLatin1(protocolBody::DATA));
     if (!dataValue.isArray())
     {
-        m_mainWindow->setMessageStatus(QStringLiteral("好友列表响应缺少 data 数组"), true);
+        const QString message = QStringLiteral("好友列表响应缺少 data 数组");
+        m_mainWindow->setContactsStatus(message, true);
+        if (forNewSession)
+        {
+            m_mainWindow->setMessageStatus(message, true);
+        }
         return;
     }
-    promptFriendSelection(dataValue.toArray());
+
+    QVector<ContactItem> contacts;
+    const QJsonArray items = dataValue.toArray();
+    for (const QJsonValue &value : items)
+    {
+        if (!value.isObject())
+        {
+            continue;
+        }
+        const QJsonObject item = value.toObject();
+        ContactItem contact;
+        if (!readPositiveJsonInteger(item, protocolBody::USER_ID, contact.userId))
+        {
+            continue;
+        }
+        contact.username = item.value(QString::fromLatin1(protocolBody::USERNAME)).toString().trimmed();
+        contact.nickname = item.value(QString::fromLatin1(protocolBody::NICKNAME)).toString().trimmed();
+        contact.avatar = item.value(QString::fromLatin1(protocolBody::AVATAR)).toString();
+        contact.createdAt = item.value(QString::fromLatin1(protocolBody::CREATED_AT)).toString();
+        if (contact.username.isEmpty())
+        {
+            continue;
+        }
+        contacts.push_back(contact);
+    }
+
+    m_mainWindow->setContacts(contacts);
+    m_mainWindow->setContactsStatus(QStringLiteral("好友列表已更新，共 %1 位好友。").arg(contacts.size()), false);
+    if (forNewSession)
+    {
+        promptFriendSelection(dataValue.toArray());
+    }
+}
+
+void AppController::handlePendingFriendListResponse(
+    protocolHeader::CommandType responseCommand,
+    const QByteArray &jsonBody)
+{
+    if (m_mainWindow == nullptr)
+    {
+        return;
+    }
+    if (responseCommand != protocolHeader::CommandType::QUERY_PENDING_FRIEND_LIST_SUCCESS &&
+        responseCommand != protocolHeader::CommandType::QUERY_PENDING_FRIEND_LIST_FAILED)
+    {
+        m_mainWindow->setContactsStatus(QStringLiteral("服务器返回了无法识别的好友申请列表响应"), true);
+        return;
+    }
+
+    QJsonParseError parseError;
+    const QJsonDocument document = QJsonDocument::fromJson(jsonBody, &parseError);
+    if (parseError.error != QJsonParseError::NoError || !document.isObject())
+    {
+        m_mainWindow->setContactsStatus(QStringLiteral("无法解析服务器返回的好友申请列表"), true);
+        return;
+    }
+
+    const QJsonObject body = document.object();
+    const QString serverMessage = body.value(QString::fromLatin1(protocolBody::MESSAGE))
+                                      .toString(QStringLiteral("收到的好友申请查询已完成"));
+    if (responseCommand == protocolHeader::CommandType::QUERY_PENDING_FRIEND_LIST_FAILED)
+    {
+        m_mainWindow->setContactsStatus(serverMessage, true);
+        return;
+    }
+
+    const QJsonValue dataValue = body.value(QString::fromLatin1(protocolBody::DATA));
+    if (!dataValue.isArray())
+    {
+        m_mainWindow->setContactsStatus(QStringLiteral("好友申请列表响应缺少 data 数组"), true);
+        return;
+    }
+
+    QVector<PendingFriendRequestItem> requests;
+    for (const QJsonValue &value : dataValue.toArray())
+    {
+        if (!value.isObject())
+        {
+            continue;
+        }
+        const QJsonObject item = value.toObject();
+        PendingFriendRequestItem request;
+        if (!readPositiveJsonInteger(item, protocolBody::FRIEND_REQUEST_ID, request.requestId) ||
+            !readPositiveJsonInteger(item, protocolBody::USER_ID, request.senderId))
+        {
+            continue;
+        }
+        request.username = item.value(QString::fromLatin1(protocolBody::USERNAME)).toString().trimmed();
+        request.nickname = item.value(QString::fromLatin1(protocolBody::NICKNAME)).toString().trimmed();
+        request.avatar = item.value(QString::fromLatin1(protocolBody::AVATAR)).toString();
+        request.createdAt = item.value(QString::fromLatin1(protocolBody::CREATED_AT)).toString();
+        if (!request.username.isEmpty())
+        {
+            requests.push_back(request);
+        }
+    }
+
+    m_mainWindow->setPendingFriendRequests(requests);
+    m_mainWindow->setContactsStatus(QStringLiteral("收到的好友申请已更新，共 %1 条待处理申请。").arg(requests.size()), false);
+}
+
+void AppController::handleFriendRequestSendResponse(
+    protocolHeader::CommandType responseCommand,
+    const QByteArray &jsonBody)
+{
+    if (m_mainWindow == nullptr)
+    {
+        return;
+    }
+    if (responseCommand != protocolHeader::CommandType::FRIEND_REQUEST_SEND_SUCCESS &&
+        responseCommand != protocolHeader::CommandType::FRIEND_REQUEST_SEND_FAILED)
+    {
+        m_mainWindow->finishAddFriendRequest(false);
+        m_mainWindow->setContactsStatus(QStringLiteral("服务器返回了无法识别的好友申请响应"), true);
+        return;
+    }
+
+    QJsonParseError parseError;
+    const QJsonDocument document = QJsonDocument::fromJson(jsonBody, &parseError);
+    if (parseError.error != QJsonParseError::NoError || !document.isObject())
+    {
+        m_mainWindow->finishAddFriendRequest(false);
+        m_mainWindow->setContactsStatus(QStringLiteral("无法解析服务器返回的好友申请结果"), true);
+        return;
+    }
+
+    const QJsonObject body = document.object();
+    const QString message = body.value(QString::fromLatin1(protocolBody::MESSAGE))
+                                .toString(QStringLiteral("好友申请请求已完成"));
+    const bool success = responseCommand == protocolHeader::CommandType::FRIEND_REQUEST_SEND_SUCCESS;
+    m_mainWindow->finishAddFriendRequest(success);
+    m_mainWindow->setContactsStatus(message, !success);
+}
+
+void AppController::handleFriendRequestHandleResponse(
+    protocolHeader::CommandType responseCommand,
+    const QByteArray &jsonBody)
+{
+    // 只有一条好友申请处理请求允许在途，因此在收到结果时取出对应的申请方 ID 和操作。
+    const quint64 handledFriendUserId = m_pendingHandledFriendUserId;
+    const int handledAction = m_pendingFriendRequestAction;
+    m_pendingHandledFriendUserId = 0;
+    m_pendingFriendRequestAction = 0;
+
+    if (m_mainWindow == nullptr)
+    {
+        return;
+    }
+    if (responseCommand != protocolHeader::CommandType::FRIEND_REQUEST_HANDLE_SUCCESS &&
+        responseCommand != protocolHeader::CommandType::FRIEND_REQUEST_HANDLE_FAILED)
+    {
+        m_mainWindow->setContactsStatus(QStringLiteral("服务器返回了无法识别的好友申请处理结果"), true);
+        return;
+    }
+
+    QJsonParseError parseError;
+    const QJsonDocument document = QJsonDocument::fromJson(jsonBody, &parseError);
+    if (parseError.error != QJsonParseError::NoError || !document.isObject())
+    {
+        m_mainWindow->setContactsStatus(QStringLiteral("无法解析服务器返回的好友申请处理结果"), true);
+        return;
+    }
+
+    const QJsonObject body = document.object();
+    const QString message = body.value(QString::fromLatin1(protocolBody::MESSAGE))
+                                .toString(QStringLiteral("好友申请处理完成"));
+    const bool success = responseCommand == protocolHeader::CommandType::FRIEND_REQUEST_HANDLE_SUCCESS;
+    m_mainWindow->setContactsStatus(message, !success);
+    if (success)
+    {
+        // 同意会新增好友关系；同意或拒绝都会从待处理列表中移除该申请。
+        requestFriendListForContacts();
+        requestPendingFriendRequests();
+
+        if (handledAction == 1 && handledFriendUserId > 0)
+        {
+            // 服务端只向已打开/订阅会话的连接推送消息。
+            // 同意好友后立即创建或复用双方唯一的私聊，并订阅该会话，避免对方首条消息被跳过。
+            m_mainWindow->showMessagesPage();
+            openPrivateConversation(handledFriendUserId);
+        }
+    }
 }
 
 void AppController::promptFriendSelection(const QJsonArray &friends)
@@ -1396,44 +1863,116 @@ void AppController::promptFriendSelection(const QJsonArray &friends)
         return;
     }
 
+    // 使用无系统标题栏的紫灰卡片，和主界面及 ModernMessageBox 保持一致。
     QDialog dialog(m_mainWindow);
     dialog.setWindowTitle(QStringLiteral("新建私聊"));
+    dialog.setWindowFlags(Qt::Dialog | Qt::FramelessWindowHint);
+    dialog.setAttribute(Qt::WA_TranslucentBackground, true);
     dialog.setModal(true);
-    dialog.setMinimumWidth(340);
-    dialog.setStyleSheet(QStringLiteral(
-        "QDialog { background: #FCFBFF; color: #302A48; }"
-        "QLabel { color: #504966; font-size: 13px; }"
-        "QComboBox { background: #FFFFFF; color: #302A48; border: 1px solid #DCD5F0;"
-        " border-radius: 8px; padding: 7px 9px; min-height: 22px; }"
-        "QComboBox QAbstractItemView { background: #FFFFFF; color: #302A48;"
-        " selection-background-color: #F0EBFF; selection-color: #302A48; }"
-        "QPushButton { background: #F0EDFA; color: #504966; border: 0; border-radius: 8px;"
-        " padding: 8px 16px; min-width: 68px; }"
-        "QPushButton:hover { background: #E8E1FB; }"
-        "QPushButton#startPrivateChatButton { background: #6A53F6; color: #FFFFFF; }"
-        "QPushButton#startPrivateChatButton:hover { background: #5941E7; }"));
+    dialog.setFixedWidth(460);
 
-    auto *layout = new QVBoxLayout(&dialog);
-    layout->setContentsMargins(20, 18, 20, 18);
-    layout->setSpacing(12);
-    auto *label = new QLabel(QStringLiteral("选择一位好友，打开或创建私聊会话"), &dialog);
-    auto *combo = new QComboBox(&dialog);
+    auto *outerLayout = new QVBoxLayout(&dialog);
+    outerLayout->setContentsMargins(18, 18, 18, 18);
+    outerLayout->setSpacing(0);
+
+    auto *card = new QFrame(&dialog);
+    card->setObjectName(QStringLiteral("privateChatDialogCard"));
+    card->setAttribute(Qt::WA_StyledBackground, true);
+    card->setStyleSheet(QStringLiteral(
+        "QFrame#privateChatDialogCard { background: %1; border: 1px solid #E8E1F5; border-radius: 18px; }")
+        .arg(Theme::Surface.name()));
+
+    auto *shadow = new QGraphicsDropShadowEffect(card);
+    shadow->setBlurRadius(30.0);
+    shadow->setOffset(0.0, 8.0);
+    shadow->setColor(Theme::WindowShadowColor);
+    card->setGraphicsEffect(shadow);
+
+    auto *layout = new QVBoxLayout(card);
+    layout->setContentsMargins(24, 22, 24, 22);
+    layout->setSpacing(0);
+
+    auto *titleRow = new QHBoxLayout;
+    titleRow->setContentsMargins(0, 0, 0, 0);
+    titleRow->setSpacing(10);
+    auto *titleColumn = new QVBoxLayout;
+    titleColumn->setSpacing(5);
+    auto *titleLabel = new QLabel(QStringLiteral("新建私聊"), card);
+    titleLabel->setStyleSheet(QStringLiteral(
+        "color: %1; background: transparent; border: none; font-size: 17px; font-weight: 750;")
+        .arg(Theme::Ink.name()));
+    auto *subtitleLabel = new QLabel(QStringLiteral("选择一位好友，打开或创建私聊会话"), card);
+    subtitleLabel->setWordWrap(true);
+    subtitleLabel->setStyleSheet(QStringLiteral(
+        "color: %1; background: transparent; border: none; font-size: 12px;")
+        .arg(Theme::InkSoft.name()));
+    titleColumn->addWidget(titleLabel);
+    titleColumn->addWidget(subtitleLabel);
+    titleRow->addLayout(titleColumn, 1);
+
+    auto *closeButton = new QPushButton(QStringLiteral("×"), card);
+    closeButton->setCursor(Qt::PointingHandCursor);
+    closeButton->setFixedSize(30, 30);
+    closeButton->setStyleSheet(QStringLiteral(
+        "QPushButton { color: %1; background: %2; border: none; border-radius: 15px; font-size: 19px; }"
+        "QPushButton:hover { color: white; background: %3; }")
+        .arg(Theme::InkSoft.name(), Theme::Nav.name(), Theme::CloseHover.name()));
+    connect(closeButton, &QPushButton::clicked, &dialog, &QDialog::reject);
+    titleRow->addWidget(closeButton, 0, Qt::AlignTop);
+    layout->addLayout(titleRow);
+    layout->addSpacing(22);
+
+    auto *combo = new QComboBox(card);
+    combo->setObjectName(QStringLiteral("privateChatFriendCombo"));
+    combo->setMinimumHeight(42);
+    combo->setCursor(Qt::PointingHandCursor);
+    combo->setStyleSheet(QStringLiteral(
+        "QComboBox { color: %1; background: %2; border: 1px solid #E1DBF1; border-radius: 10px; padding: 0 12px; }"
+        "QComboBox:hover { border-color: #CFC3F5; }"
+        "QComboBox:focus { border-color: %3; }"
+        "QComboBox::drop-down { width: 30px; border: none; }"
+        "QComboBox QAbstractItemView { color: %1; background: %2; border: 1px solid #E1DBF1;"
+        " selection-background-color: %4; selection-color: %1; outline: none; padding: 5px; }")
+        .arg(Theme::Ink.name(), Theme::White.name(), Theme::Purple.name(), Theme::ConversationActive.name()));
     for (const FriendChoice &choice : choices)
     {
         combo->addItem(choice.display, QVariant::fromValue<qulonglong>(choice.userId));
     }
+    layout->addWidget(combo);
+    layout->addSpacing(24);
+
     auto *buttonRow = new QHBoxLayout;
+    buttonRow->setContentsMargins(0, 0, 0, 0);
+    buttonRow->setSpacing(10);
     buttonRow->addStretch(1);
-    auto *cancelButton = new QPushButton(QStringLiteral("取消"), &dialog);
-    auto *startButton = new QPushButton(QStringLiteral("打开会话"), &dialog);
+    auto *cancelButton = new QPushButton(QStringLiteral("取消"), card);
+    cancelButton->setCursor(Qt::PointingHandCursor);
+    cancelButton->setFixedSize(86, 38);
+    cancelButton->setStyleSheet(QStringLiteral(
+        "QPushButton { color: %1; background: %2; border: 1px solid #E4DDF3; border-radius: 10px; font-weight: 600; }"
+        "QPushButton:hover { background: %3; }")
+        .arg(Theme::InkSoft.name(), Theme::Nav.name(), Theme::PurpleSoft.name()));
+    auto *startButton = new QPushButton(QStringLiteral("打开会话"), card);
     startButton->setObjectName(QStringLiteral("startPrivateChatButton"));
+    startButton->setCursor(Qt::PointingHandCursor);
+    startButton->setFixedSize(112, 38);
+    startButton->setStyleSheet(QStringLiteral(
+        "QPushButton#startPrivateChatButton { color: white; background: %1; border: none; border-radius: 10px; font-weight: 650; }"
+        "QPushButton#startPrivateChatButton:hover { background: %2; }"
+        "QPushButton#startPrivateChatButton:pressed { background: #4935C8; }")
+        .arg(Theme::Purple.name(), Theme::PurpleDeep.name()));
     buttonRow->addWidget(cancelButton);
     buttonRow->addWidget(startButton);
-    layout->addWidget(label);
-    layout->addWidget(combo);
     layout->addLayout(buttonRow);
+    outerLayout->addWidget(card);
+
     connect(cancelButton, &QPushButton::clicked, &dialog, &QDialog::reject);
     connect(startButton, &QPushButton::clicked, &dialog, &QDialog::accept);
+
+    dialog.adjustSize();
+    const QPoint parentCenter = m_mainWindow->mapToGlobal(m_mainWindow->rect().center());
+    dialog.move(parentCenter.x() - dialog.width() / 2,
+                parentCenter.y() - dialog.height() / 2);
 
     if (dialog.exec() != QDialog::Accepted)
     {
@@ -1447,17 +1986,7 @@ void AppController::promptFriendSelection(const QJsonArray &friends)
         return;
     }
 
-    QJsonObject body;
-    body.insert(QString::fromLatin1(protocolBody::TYPE), 1); // 1=私聊。
-    body.insert(QString::fromLatin1(protocolBody::TARGET_USER_ID),
-                QJsonValue(static_cast<qint64>(targetUserId)));
-    const quint64 requestId = sendOperationRequest(
-        protocolHeader::CommandType::CHATCREATE_REQUEST, body);
-    if (requestId != 0)
-    {
-        m_createConversationRequestId = requestId;
-        m_mainWindow->setMessageStatus(QStringLiteral("正在打开私聊会话…"), false);
-    }
+    openPrivateConversation(targetUserId);
 }
 
 void AppController::handleCreateConversationResponse(
@@ -1644,7 +2173,7 @@ void AppController::handleHistoryResponse(quint64 requestId,
     }
     nextCursor = static_cast<quint64>(cursorNumber);
 
-    int insertedCount = 0;
+    QVector<ChatMessageRecord> historyMessages;
     quint64 smallestSequence = 0;
     const QJsonArray items = contentValue.toArray();
     for (const QJsonValue &itemValue : items)
@@ -1678,11 +2207,11 @@ void AppController::handleHistoryResponse(quint64 requestId,
         {
             smallestSequence = message.sequence;
         }
-        if (m_mainWindow->appendMessage(message))
-        {
-            ++insertedCount;
-        }
+        historyMessages.push_back(message);
     }
+
+    // 一次性把历史页交给聊天区处理；避免逐条插入时反复滚到底部，导致视口跳动。
+    const int insertedCount = m_mainWindow->appendHistoryMessages(conversationId, historyMessages);
 
     if (nextCursor == 0 || items.isEmpty() || smallestSequence == 0)
     {
@@ -1732,9 +2261,21 @@ void AppController::onLoginSucceeded()
                 this, &AppController::onMessageRetryRequested);
         connect(m_mainWindow, &MainWindow::newSessionRequested,
                 this, &AppController::onNewSessionRequested);
+        connect(m_mainWindow, &MainWindow::contactsRefreshRequested,
+                this, &AppController::onContactsRefreshRequested);
+        connect(m_mainWindow, &MainWindow::friendRequestSendRequested,
+                this, &AppController::onFriendRequestSendRequested);
+        connect(m_mainWindow, &MainWindow::friendRequestHandleRequested,
+                this, &AppController::onFriendRequestHandleRequested);
+        connect(m_mainWindow, &MainWindow::contactOpenPrivateChatRequested,
+                this, &AppController::onContactOpenPrivateChatRequested);
     }
 
     m_mainWindow->clearSessions();
+    m_mainWindow->setContacts({});
+    m_mainWindow->setPendingFriendRequests({});
+    m_mainWindow->setContactsStatus(QStringLiteral("进入联系人页以加载好友和收到的申请。"), false);
+    m_mainWindow->finishAddFriendRequest(false);
     m_mainWindow->setCurrentUsername(m_currentAccount);
     setNetworkStatus(QStringLiteral("服务器连接正常"), QStringLiteral("connected"));
     m_mainWindow->show();

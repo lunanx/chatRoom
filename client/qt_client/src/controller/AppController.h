@@ -47,9 +47,14 @@ private slots:
 
     // 当前已登录用户在选中的真实会话中发送一条文本消息。
     void onMessageSendRequested(const QString &text, quint64 conversationId, bool isGroup);
+    // 点击失败消息时，使用原 client_msg_id 和原请求正文重试。
     void onMessageRetryRequested(const QString &clientMessageId);
     void onHistoryRequested(quint64 conversationId);
     void onNewSessionRequested();
+    void onContactsRefreshRequested();
+    void onFriendRequestSendRequested(const QString &username);
+    void onFriendRequestHandleRequested(quint64 requestId, quint64 senderUserId, int action);
+    void onContactOpenPrivateChatRequested(quint64 userId);
 
 private:
     // 一个请求在真正发送前需要保存命令、编号和 JSON 内容。
@@ -100,6 +105,15 @@ private:
                                        const QByteArray &jsonBody);
     void handleFriendListResponse(protocolHeader::CommandType responseCommand,
                                   const QByteArray &jsonBody);
+    void handlePendingFriendListResponse(protocolHeader::CommandType responseCommand,
+                                         const QByteArray &jsonBody);
+    void handleFriendRequestSendResponse(protocolHeader::CommandType responseCommand,
+                                         const QByteArray &jsonBody);
+    void handleFriendRequestHandleResponse(protocolHeader::CommandType responseCommand,
+                                           const QByteArray &jsonBody);
+    void requestFriendListForContacts();
+    void requestPendingFriendRequests();
+    void openPrivateConversation(quint64 targetUserId);
     void handleCreateConversationResponse(protocolHeader::CommandType responseCommand,
                                          const QByteArray &jsonBody);
     void promptFriendSelection(const QJsonArray &friends);
@@ -153,7 +167,14 @@ private:
     QHash<quint64, QTimer *> m_operationRequestTimers;
     quint64 m_conversationListRequestId = 0;
     quint64 m_friendListRequestId = 0;
+    quint64 m_pendingFriendListRequestId = 0;
+    quint64 m_sendFriendRequestId = 0;
+    quint64 m_handleFriendRequestId = 0;
+    // 好友申请处理成功后，若 action=1，则自动打开申请方的私聊。
+    quint64 m_pendingHandledFriendUserId = 0;
+    int m_pendingFriendRequestAction = 0;
     quint64 m_createConversationRequestId = 0;
+    bool m_friendListRequestForNewSession = false;
     quint64 m_pendingConversationSelectionId = 0;
     bool m_conversationListRefreshPending = false;
 
