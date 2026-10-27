@@ -19,6 +19,8 @@
 #include <QSizePolicy>
 #include <QStyle>
 #include <QLinearGradient>
+#include <QSettings>
+#include <QSignalBlocker>
 
 namespace
 {
@@ -249,7 +251,17 @@ AuthPage::AuthPage(QWidget *parent)
 
     m_rememberCheckBox = new QCheckBox(QStringLiteral("记住我"), form);
     m_rememberCheckBox->setObjectName(QStringLiteral("authRememberCheckBox"));
-    m_rememberCheckBox->setChecked(true);
+
+    // 只保存账号，不保存密码。默认保留原界面行为：首次使用时勾选“记住我”。
+    QSettings authSettings(QStringLiteral("GoLiao"), QStringLiteral("ChatRoomClient"));
+    const bool rememberAccount = authSettings.value(
+        QStringLiteral("auth/rememberEnabled"), true).toBool();
+    m_rememberCheckBox->setChecked(rememberAccount);
+    if (rememberAccount)
+    {
+        m_accountEdit->setText(authSettings.value(
+            QStringLiteral("auth/rememberedAccount")).toString());
+    }
 
     auto *hintRow = new QHBoxLayout();
     hintRow->setContentsMargins(0, 0, 0, 24);
@@ -302,6 +314,17 @@ AuthPage::AuthPage(QWidget *parent)
     m_windowControls->move(width() - 18 - m_windowControls->width(), 14);
     m_windowControls->raise();
 
+    // 用户取消勾选时，立即删除已记住的账号；密码从不写入设置。
+    connect(m_rememberCheckBox, &QCheckBox::toggled, this, [](bool checked)
+    {
+        QSettings settings(QStringLiteral("GoLiao"), QStringLiteral("ChatRoomClient"));
+        settings.setValue(QStringLiteral("auth/rememberEnabled"), checked);
+        if (!checked)
+        {
+            settings.remove(QStringLiteral("auth/rememberedAccount"));
+        }
+    });
+
     connect(m_loginButton, &QPushButton::clicked,
             this, [this]()
     {
@@ -332,6 +355,43 @@ void AuthPage::setNetworkStatus(const QString &message, const QString &state)
     m_networkStatusLabel->style()->unpolish(m_networkStatusLabel);
     m_networkStatusLabel->style()->polish(m_networkStatusLabel);
     m_networkStatusLabel->update();
+}
+
+void AuthPage::rememberSuccessfulLogin(const QString &account, bool rememberMe)
+{
+    QSettings settings(QStringLiteral("GoLiao"), QStringLiteral("ChatRoomClient"));
+    settings.setValue(QStringLiteral("auth/rememberEnabled"), rememberMe);
+
+    // 同步复选框，但不触发 toggled 槽再次修改设置。
+    const QSignalBlocker blocker(m_rememberCheckBox);
+    m_rememberCheckBox->setChecked(rememberMe);
+
+    if (rememberMe)
+    {
+        settings.setValue(QStringLiteral("auth/rememberedAccount"), account.trimmed());
+        m_accountEdit->setText(account.trimmed());
+    }
+    else
+    {
+        settings.remove(QStringLiteral("auth/rememberedAccount"));
+    }
+
+    // 登录成功后无需继续在隐藏表单中保留密码。
+    m_passwordEdit->clear();
+}
+
+void AuthPage::resetForNextLogin()
+{
+    QSettings settings(QStringLiteral("GoLiao"), QStringLiteral("ChatRoomClient"));
+    const bool rememberAccount = settings.value(
+        QStringLiteral("auth/rememberEnabled"), true).toBool();
+
+    const QSignalBlocker blocker(m_rememberCheckBox);
+    m_rememberCheckBox->setChecked(rememberAccount);
+    m_accountEdit->setText(rememberAccount
+        ? settings.value(QStringLiteral("auth/rememberedAccount")).toString()
+        : QString());
+    m_passwordEdit->clear();
 }
 
 void AuthPage::focusAccountInput()

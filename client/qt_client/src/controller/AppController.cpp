@@ -245,6 +245,7 @@ void AppController::onLoginRequested(const QString &account,
     body.insert(QString::fromLatin1(protocolBody::PASSWORD), password);
 
     m_pendingLoginAccount = normalizedAccount;
+    m_pendingRememberMe = rememberMe;
     m_authRequestPending = true;
     m_requestTimer.start(15000);
     queueOrSendRequest(protocolHeader::CommandType::LOGIN_REQUEST, body);
@@ -281,6 +282,8 @@ void AppController::onRegisterRequested(const QString &account,
                             QStringLiteral("请输入账号和密码。"), true);
         return;
     }
+
+    m_pendingRememberMe = false;
 
     QJsonObject body;
     body.insert(QStringLiteral("account"), normalizedAccount);
@@ -667,6 +670,7 @@ void AppController::onPacketReceived(quint16 command,
             }
         }
         m_pendingLoginAccount.clear();
+        m_pendingRememberMe = false;
         showResponseMessage(
             QStringLiteral("服务器响应异常"),
             QStringLiteral("收到的响应命令与当前请求不匹配，请检查客户端与服务端协议版本。"),
@@ -692,6 +696,7 @@ void AppController::onPacketReceived(quint16 command,
             }
         }
         m_pendingLoginAccount.clear();
+        m_pendingRememberMe = false;
         showResponseMessage(
             QStringLiteral("服务器响应格式错误"),
             QStringLiteral("无法解析服务器返回的 JSON。"),
@@ -710,11 +715,14 @@ void AppController::onPacketReceived(quint16 command,
         m_isAuthenticated = true;
         m_currentAccount = m_pendingLoginAccount;
         m_pendingLoginAccount.clear();
+        m_loginWindow->rememberSuccessfulLogin(m_currentAccount, m_pendingRememberMe);
+        m_pendingRememberMe = false;
         m_loginWindow->notifyLoginSucceeded();
         break;
 
     case protocolHeader::CommandType::LOGIN_FAILED:
         m_pendingLoginAccount.clear();
+        m_pendingRememberMe = false;
         setNetworkStatus(m_tcpClient->isConnected()
                              ? QStringLiteral("服务器已连接")
                              : QStringLiteral("连接已断开"),
@@ -725,6 +733,7 @@ void AppController::onPacketReceived(quint16 command,
         break;
 
     case protocolHeader::CommandType::REGISTER_SUCCESS:
+        m_pendingRememberMe = false;
         setNetworkStatus(m_tcpClient->isConnected()
                              ? QStringLiteral("服务器已连接")
                              : QStringLiteral("连接已断开"),
@@ -735,6 +744,7 @@ void AppController::onPacketReceived(quint16 command,
         break;
 
     case protocolHeader::CommandType::REGISTER_FAILED:
+        m_pendingRememberMe = false;
         setNetworkStatus(m_tcpClient->isConnected()
                              ? QStringLiteral("服务器已连接")
                              : QStringLiteral("连接已断开"),
@@ -749,12 +759,18 @@ void AppController::onPacketReceived(quint16 command,
         m_isAuthenticated = false;
         m_currentAccount.clear();
         m_pendingLoginAccount.clear();
+        m_pendingRememberMe = false;
         returnToLoginWindow();
+        setNetworkStatus(QStringLiteral("服务器连接正常"), QStringLiteral("connected"));
         showResponseMessage(QStringLiteral("退出登录成功"), message, false);
         break;
 
     case protocolHeader::CommandType::LOGOUT_FAILED:
         // 服务器拒绝退出时，保留当前登录状态，用户仍可以在主界面继续操作。
+        if (m_mainWindow != nullptr)
+        {
+            m_mainWindow->setMessageStatus(QString(), false);
+        }
         showResponseMessage(QStringLiteral("退出登录失败"), message, true);
         break;
 
@@ -767,6 +783,16 @@ void AppController::onMessageSendRequested(const QString &text,
                                            quint64 conversationId,
                                            bool isGroup)
 {
+    if (m_isLoggingOut)
+    {
+        if (m_mainWindow != nullptr)
+        {
+            m_mainWindow->setMessageStatus(
+                QStringLiteral("正在退出登录，请稍候，暂时不能发送新消息"), true);
+        }
+        return;
+    }
+
     if (m_mainWindow == nullptr || !m_isAuthenticated)
     {
         if (m_mainWindow != nullptr)
@@ -920,6 +946,10 @@ void AppController::onLogoutRequested()
 
     m_isLoggingOut = true;
     m_requestTimer.start(15000);
+    if (m_mainWindow != nullptr)
+    {
+        m_mainWindow->setMessageStatus(QStringLiteral("正在退出登录…"), false);
+    }
 
     // 服务端从当前 TCP 连接绑定的 ClientSession 识别用户，因此退出请求无需携带密码或账号。
     const PendingRequest request{
@@ -1184,6 +1214,7 @@ void AppController::clearOperationRequestTimers()
     m_pendingFriendListRequestId = 0;
     m_sendFriendRequestId = 0;
     m_handleFriendRequestId = 0;
+    m_friendRequestSenderIds.clear();
     m_pendingHandledFriendUserId = 0;
     m_pendingFriendRequestAction = 0;
     m_createConversationRequestId = 0;
@@ -1500,18 +1531,20 @@ void AppController::onFriendRequestSendRequested(const QString &username)
 }
 
 void AppController::onFriendRequestHandleRequested(quint64 requestId,
-                                                   quint64 senderUserId,
                                                    int action)
 {
     if (!m_isAuthenticated || m_isLoggingOut || m_mainWindow == nullptr)
     {
         return;
     }
-    if (requestId == 0 || senderUserId == 0 || (action != 1 && action != 2))
+    // 服务端只需要申请记录 ID 和操作类型。申请人 user_id 是客户端后续自动打开私聊时
+    // 使用的辅助信息，不应该成为同意/拒绝请求是否发送的前置条件。
+    if (requestId == 0 || (action != 1 && action != 2))
     {
-        m_mainWindow->setContactsStatus(QStringLiteral("好友申请参数无效，未发送请求。"), true);
+        m_mainWindow->setContactsStatus(QStringLiteral("好友申请记录或操作类型无效，未发送请求。"), true);
         return;
     }
+    const quint64 senderUserId = m_friendRequestSenderIds.value(requestId, 0);
     if (m_handleFriendRequestId != 0)
     {
         m_mainWindow->setContactsStatus(QStringLiteral("正在处理另一条好友申请，请稍候。"), false);
@@ -1709,6 +1742,7 @@ void AppController::handlePendingFriendListResponse(
     }
 
     QVector<PendingFriendRequestItem> requests;
+    QHash<quint64, quint64> requestSenderIds;
     for (const QJsonValue &value : dataValue.toArray())
     {
         if (!value.isObject())
@@ -1717,21 +1751,25 @@ void AppController::handlePendingFriendListResponse(
         }
         const QJsonObject item = value.toObject();
         PendingFriendRequestItem request;
-        if (!readPositiveJsonInteger(item, protocolBody::FRIEND_REQUEST_ID, request.requestId) ||
-            !readPositiveJsonInteger(item, protocolBody::USER_ID, request.senderId))
+        // 申请记录 ID 是同意/拒绝所必需的字段；申请人 ID 只用于之后自动打开私聊。
+        if (!readPositiveJsonInteger(item, protocolBody::FRIEND_REQUEST_ID, request.requestId))
         {
             continue;
         }
+        readPositiveJsonInteger(item, protocolBody::USER_ID, request.senderId);
         request.username = item.value(QString::fromLatin1(protocolBody::USERNAME)).toString().trimmed();
         request.nickname = item.value(QString::fromLatin1(protocolBody::NICKNAME)).toString().trimmed();
         request.avatar = item.value(QString::fromLatin1(protocolBody::AVATAR)).toString();
         request.createdAt = item.value(QString::fromLatin1(protocolBody::CREATED_AT)).toString();
         if (!request.username.isEmpty())
         {
+            requestSenderIds.insert(request.requestId, request.senderId);
             requests.push_back(request);
         }
     }
 
+    // 原子替换本次服务器返回的申请人与申请记录映射，避免 UI 行数据和控制器状态错位。
+    m_friendRequestSenderIds = requestSenderIds;
     m_mainWindow->setPendingFriendRequests(requests);
     m_mainWindow->setContactsStatus(QStringLiteral("收到的好友申请已更新，共 %1 条待处理申请。").arg(requests.size()), false);
 }
@@ -2343,6 +2381,7 @@ void AppController::startMessageRequestTimer(quint64 requestId, const QString &c
 void AppController::clearPendingRequests()
 {
     m_authRequestPending = false;
+    m_pendingRememberMe = false;
     m_isLoggingOut = false;
     m_requestTimer.stop();
 

@@ -48,7 +48,7 @@ public:
 signals:
     void refreshRequested();
     void sendFriendRequestRequested(const QString &username);
-    void handleFriendRequestRequested(quint64 requestId, quint64 senderUserId, int action);
+    void handleFriendRequestRequested(quint64 requestId, int action);
     void openPrivateChatRequested(quint64 userId);
 
 private:

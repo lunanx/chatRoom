@@ -53,7 +53,7 @@ private slots:
     void onNewSessionRequested();
     void onContactsRefreshRequested();
     void onFriendRequestSendRequested(const QString &username);
-    void onFriendRequestHandleRequested(quint64 requestId, quint64 senderUserId, int action);
+    void onFriendRequestHandleRequested(quint64 requestId, int action);
     void onContactOpenPrivateChatRequested(quint64 userId);
 
 private:
@@ -143,6 +143,8 @@ private:
 
     // 认证请求处理中时禁止再次提交，避免快速双击产生多个登录/注册请求。
     bool m_authRequestPending = false;
+    // 本次登录成功后是否记住账号；只在收到 LOGIN_SUCCESS 后持久化。
+    bool m_pendingRememberMe = false;
 
     // 退出登录请求在等待服务器确认时为 true。
     bool m_isLoggingOut = false;
@@ -170,6 +172,9 @@ private:
     quint64 m_pendingFriendListRequestId = 0;
     quint64 m_sendFriendRequestId = 0;
     quint64 m_handleFriendRequestId = 0;
+    // 申请记录 ID -> 申请人 user_id。处理请求本身只发送申请记录 ID 和 action；
+    // 该映射仅用于同意成功后自动打开申请人的私聊。
+    QHash<quint64, quint64> m_friendRequestSenderIds;
     // 好友申请处理成功后，若 action=1，则自动打开申请方的私聊。
     quint64 m_pendingHandledFriendUserId = 0;
     int m_pendingFriendRequestAction = 0;

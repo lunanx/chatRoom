@@ -27,6 +27,8 @@ public slots:
 
     // 退出登录或连接失效后，恢复到初始欢迎页及 400×500 窗口尺寸。
     void resetToWelcomePage();
+    // 在服务端确认登录成功后保存可选的账号记忆设置。
+    void rememberSuccessfulLogin(const QString &account, bool rememberMe);
     // 同步欢迎页与登录表单中的连接状态提示。
     void setNetworkStatus(const QString &message, const QString &state);
 

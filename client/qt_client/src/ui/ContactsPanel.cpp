@@ -277,19 +277,22 @@ void ContactsPanel::rebuildRequestRows()
         acceptButton->setFixedWidth(62);
         rejectButton->setFixedWidth(62);
         connect(acceptButton, &QPushButton::clicked, this,
-                [this, requestId = request.requestId, senderUserId = request.senderId]()
+                [this, requestId = request.requestId]()
         {
-            if (requestId > 0 && senderUserId > 0)
+            // 服务端处理申请只需要申请记录 ID 和操作类型。
+            // 申请人的 user_id 由 AppController 从服务器返回的数据中关联，
+            // 不在按钮事件中作为必需参数传递，避免 UI 参数不一致时拦截同意操作。
+            if (requestId > 0)
             {
-                emit handleFriendRequestRequested(requestId, senderUserId, 1);
+                emit handleFriendRequestRequested(requestId, 1);
             }
         });
         connect(rejectButton, &QPushButton::clicked, this,
-                [this, requestId = request.requestId, senderUserId = request.senderId]()
+                [this, requestId = request.requestId]()
         {
-            if (requestId > 0 && senderUserId > 0)
+            if (requestId > 0)
             {
-                emit handleFriendRequestRequested(requestId, senderUserId, 2);
+                emit handleFriendRequestRequested(requestId, 2);
             }
         });
         layout->addWidget(acceptButton);

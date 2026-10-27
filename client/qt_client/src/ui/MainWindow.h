@@ -63,7 +63,7 @@ signals:
     void newSessionRequested();
     void contactsRefreshRequested();
     void friendRequestSendRequested(const QString &username);
-    void friendRequestHandleRequested(quint64 requestId, quint64 senderUserId, int action);
+    void friendRequestHandleRequested(quint64 requestId, int action);
     void contactOpenPrivateChatRequested(quint64 userId);
 
     // 输入区请求发送文本；会话 ID 与类型来自当前选中的会话。

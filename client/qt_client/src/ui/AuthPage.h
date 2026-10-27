@@ -25,6 +25,11 @@ public:
     // 便于外部将光标放入账号输入框。
     void focusAccountInput();
 
+    // 登录成功后仅记住账号（绝不保存密码），并立即清除密码框内容。
+    void rememberSuccessfulLogin(const QString &account, bool rememberMe);
+    // 退出登录或断线后清空密码，并恢复“记住我”对应的账号。
+    void resetForNextLogin();
+
 signals:
     // 页面只传递表单内容，不在页面内部执行网络登录。
     void loginRequested(const QString &account,

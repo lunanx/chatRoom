@@ -71,8 +71,17 @@ void LoginWindow::notifyLoginSucceeded()
 // 清除登录流程的页面位置，下一次重新登录时从欢迎页开始。
 void LoginWindow::resetToWelcomePage()
 {
+    m_authPage->resetForNextLogin();
     m_pageStack->setCurrentWidget(m_welcomePage);
     resize(400, 500);
+}
+
+void LoginWindow::rememberSuccessfulLogin(const QString &account, bool rememberMe)
+{
+    if (m_authPage != nullptr)
+    {
+        m_authPage->rememberSuccessfulLogin(account, rememberMe);
+    }
 }
 
 void LoginWindow::setNetworkStatus(const QString &message, const QString &state)
