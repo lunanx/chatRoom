@@ -65,6 +65,10 @@ add_executable(InternetChatRoomServer
     src/service/MessageService.h
     src/service/ConversationService.cpp
     src/service/ConversationService.h
+    src/service/GroupInviteService.cpp
+    src/service/GroupInviteService.h
+    src/service/GroupCreateService.cpp
+    src/service/GroupCreateService.h
 
     src/repository/UserRepository.cpp
     src/repository/UserRepository.h

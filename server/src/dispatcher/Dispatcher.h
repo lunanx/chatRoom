@@ -6,6 +6,7 @@
 #include "service/ConversationService.h"
 #include "service/FriendService.h"
 #include "service/GroupInviteService.h"
+#include "service/GroupCreateService.h"
 #include "net/ClientSession.h"
 #include <optional>
 #include <vector>

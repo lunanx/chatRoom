@@ -53,6 +53,8 @@ namespace protocolBody
     constexpr const char *GROUP_ID = "group_id";
     constexpr const char *USER_IDS = "user_ids";           // 群邀请目标用户 ID 数组
     constexpr const char *INVITED_COUNT = "invited_count"; // 本次新增的群成员数量
+    constexpr const char *GROUP_NAME = "group_name";       // 新建群聊时的群名称
+    constexpr const char *MEMBER_COUNT = "member_count";   // 新群聊的成员总数（含群主）
     constexpr const char *LAST_SEQ = "last_seq";
     constexpr const char *DISPLAY_NAME = "display_name";
     constexpr const char *LAST_MESSAGE = "last_message";

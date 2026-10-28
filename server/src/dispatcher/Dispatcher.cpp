@@ -33,6 +33,8 @@ namespace
             return protocolHeader::CommandType::QUERY_CONVERSATION_LIST_FAILED;
         case protocolHeader::CommandType::GROUP_MEMBER_INVITE_REQUEST:
             return protocolHeader::CommandType::GROUP_MEMBER_INVITE_FAILED;
+        case protocolHeader::CommandType::CREATE_GROUP_REQUEST:
+            return protocolHeader::CommandType::CREATE_GROUP_FAILED;
         default:
             return protocolHeader::CommandType::UNKNOWN;
         }
@@ -185,6 +187,28 @@ DispatchResult Dispatcher::dispatch(const protocolHeader::PacketFrame &frame, Cl
                 if (responseCommand == protocolHeader::CommandType::GROUP_MEMBER_INVITE_SUCCESS)
                 {
                     // 记录邀请人对群会话的订阅关系，并在 EpollReactor 中通知新增成员。
+                    dispatchResult.conversationId = result.conversationId;
+                    dispatchResult.invitedUserIds = result.invitedUserIds;
+                }
+            }
+        }
+        // 新建群聊。群主身份只取自服务端认证会话，请求体里没有也不接受任何“群主 ID”。
+        else if (command == protocolHeader::CommandType::CREATE_GROUP_REQUEST)
+        {
+            if (!session.isAuthenticated())
+            {
+                responseCommand = protocolHeader::CommandType::CREATE_GROUP_FAILED;
+                responseBody = makeResponseBody(responseCommand, "当前没有账号登录");
+            }
+            else
+            {
+                const auto &user = session.getAuthenticatedUser();
+                const GroupCreateResult result = GroupCreateService::createGroup(
+                    frame.m_body, responseBody, user->userId);
+                responseCommand = result.command;
+                if (responseCommand == protocolHeader::CommandType::CREATE_GROUP_SUCCESS)
+                {
+                    // 与群邀请共用 EpollReactor 的后处理：订阅创建者连接，并通知在线的初始成员。
                     dispatchResult.conversationId = result.conversationId;
                     dispatchResult.invitedUserIds = result.invitedUserIds;
                 }

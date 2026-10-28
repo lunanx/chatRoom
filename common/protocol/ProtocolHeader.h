@@ -154,7 +154,7 @@ namespace protocolHeader
         QUERY_CONVERSATION_LIST_REQUEST = 38,
         QUERY_CONVERSATION_LIST_SUCCESS = 39,
         QUERY_CONVERSATION_LIST_FAILED = 40,
-        
+
         /*
             邀请好友加入群聊
         */
@@ -162,7 +162,15 @@ namespace protocolHeader
         GROUP_MEMBER_INVITE_SUCCESS = 42,
         GROUP_MEMBER_INVITE_FAILED = 43,
         // 服务端推送：当前在线用户被邀请加入群聊，客户端应刷新会话列表。
-        GROUP_MEMBER_INVITED_PUSH = 44
+        GROUP_MEMBER_INVITED_PUSH = 44,
+
+        /*
+            新建群聊：服务端在一个事务内创建 Group、群主/初始成员和群聊 Conversation。
+            初始成员会复用 GROUP_MEMBER_INVITED_PUSH 收到在线通知。
+        */
+        CREATE_GROUP_REQUEST = 45,
+        CREATE_GROUP_SUCCESS = 46,
+        CREATE_GROUP_FAILED = 47
     };
     /*
        单个Body允许的最大长度
