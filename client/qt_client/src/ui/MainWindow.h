@@ -65,6 +65,7 @@ signals:
     void friendRequestSendRequested(const QString &username);
     void friendRequestHandleRequested(quint64 requestId, int action);
     void contactOpenPrivateChatRequested(quint64 userId);
+    void groupInviteRequested(quint64 conversationId);
 
     // 输入区请求发送文本；会话 ID 与类型来自当前选中的会话。
     void messageSendRequested(const QString &text, quint64 conversationId, bool isGroup);

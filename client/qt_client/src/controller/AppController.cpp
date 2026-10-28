@@ -9,6 +9,8 @@
 
 #include <QCoreApplication>
 #include <QComboBox>
+#include <QListWidget>
+#include <QListWidgetItem>
 #include <QDate>
 #include <QDialog>
 #include <QHBoxLayout>
@@ -448,6 +450,26 @@ void AppController::onPacketReceived(quint16 command,
         return;
     }
 
+    // 被邀请用户在线时，服务端会主动通知。先刷新会话列表，再自动选中新群聊。
+    if (receivedCommand == protocolHeader::CommandType::GROUP_MEMBER_INVITED_PUSH)
+    {
+        QJsonParseError inviteParseError;
+        const QJsonDocument inviteDocument = QJsonDocument::fromJson(jsonBody, &inviteParseError);
+        quint64 invitedConversationId = 0;
+        if (inviteParseError.error == QJsonParseError::NoError && inviteDocument.isObject() &&
+            readPositiveJsonInteger(inviteDocument.object(), protocolBody::CONVERSATION_ID,
+                                    invitedConversationId))
+        {
+            m_pendingConversationSelectionId = invitedConversationId;
+            if (m_mainWindow != nullptr)
+            {
+                m_mainWindow->setMessageStatus(QStringLiteral("你已被邀请加入群聊，正在刷新会话列表…"), false);
+            }
+            requestConversationList();
+        }
+        return;
+    }
+
     // 当前服务器主动推送消息时固定使用 request_id=0。
     // 必须先识别推送，再查找请求表；否则这类消息会被误当成“未知响应”直接丢弃。
     if (receivedCommand == protocolHeader::CommandType::GROUP_MESSAGE_RECV ||
@@ -528,6 +550,16 @@ void AppController::onPacketReceived(quint16 command,
             m_handleFriendRequestId = 0;
         }
         handleFriendRequestHandleResponse(responseCommand, jsonBody);
+        return;
+    }
+
+    if (originalCommand == protocolHeader::CommandType::GROUP_MEMBER_INVITE_REQUEST)
+    {
+        if (m_groupInviteRequestId == requestId)
+        {
+            m_groupInviteRequestId = 0;
+        }
+        handleGroupInviteResponse(responseCommand, jsonBody);
         return;
     }
 
@@ -1096,6 +1128,9 @@ quint64 AppController::sendOperationRequest(protocolHeader::CommandType command,
         const bool friendListWasForNewSession =
             command == protocolHeader::CommandType::QUERY_FRIEND_LIST_REQUEST &&
             m_friendListRequestForNewSession;
+        const bool friendListWasForGroupInvite =
+            command == protocolHeader::CommandType::QUERY_FRIEND_LIST_REQUEST &&
+            m_pendingGroupInviteConversationId > 0;
         switch (command)
         {
         case protocolHeader::CommandType::QUERY_CONVERSATION_LIST_REQUEST:
@@ -1112,6 +1147,7 @@ quint64 AppController::sendOperationRequest(protocolHeader::CommandType command,
                 m_friendListRequestId = 0;
             }
             m_friendListRequestForNewSession = false;
+            m_pendingGroupInviteConversationId = 0;
             break;
         case protocolHeader::CommandType::QUERY_PENDING_FRIEND_LIST_REQUEST:
             if (m_pendingFriendListRequestId == requestId)
@@ -1139,6 +1175,12 @@ quint64 AppController::sendOperationRequest(protocolHeader::CommandType command,
                 m_createConversationRequestId = 0;
             }
             break;
+        case protocolHeader::CommandType::GROUP_MEMBER_INVITE_REQUEST:
+            if (m_groupInviteRequestId == requestId)
+            {
+                m_groupInviteRequestId = 0;
+            }
+            break;
         default:
             break;
         }
@@ -1152,9 +1194,11 @@ quint64 AppController::sendOperationRequest(protocolHeader::CommandType command,
             }
             else if (command == protocolHeader::CommandType::QUERY_FRIEND_LIST_REQUEST)
             {
-                status = QStringLiteral("好友列表加载超时，请重试");
+                status = friendListWasForGroupInvite
+                             ? QStringLiteral("加载可邀请好友列表超时，请重试")
+                             : QStringLiteral("好友列表加载超时，请重试");
                 m_mainWindow->setContactsStatus(status, true);
-                if (friendListWasForNewSession)
+                if (friendListWasForNewSession || friendListWasForGroupInvite)
                 {
                     m_mainWindow->setMessageStatus(status, true);
                 }
@@ -1179,6 +1223,10 @@ quint64 AppController::sendOperationRequest(protocolHeader::CommandType command,
             else if (command == protocolHeader::CommandType::CHATCREATE_REQUEST)
             {
                 status = QStringLiteral("创建/打开会话超时，请检查连接后重试");
+            }
+            else if (command == protocolHeader::CommandType::GROUP_MEMBER_INVITE_REQUEST)
+            {
+                status = QStringLiteral("群聊邀请超时，请刷新会话列表确认处理结果");
             }
             m_mainWindow->setMessageStatus(status, true);
         }
@@ -1218,6 +1266,8 @@ void AppController::clearOperationRequestTimers()
     m_pendingHandledFriendUserId = 0;
     m_pendingFriendRequestAction = 0;
     m_createConversationRequestId = 0;
+    m_groupInviteRequestId = 0;
+    m_pendingGroupInviteConversationId = 0;
     m_pendingConversationSelectionId = 0;
     m_conversationListRefreshPending = false;
     m_friendListRequestForNewSession = false;
@@ -1577,6 +1627,51 @@ void AppController::onContactOpenPrivateChatRequested(quint64 userId)
     openPrivateConversation(userId);
 }
 
+void AppController::onGroupInviteRequested(quint64 conversationId)
+{
+    if (!m_isAuthenticated || m_isLoggingOut || m_mainWindow == nullptr)
+    {
+        return;
+    }
+    if (conversationId == 0)
+    {
+        m_mainWindow->setMessageStatus(QStringLiteral("当前群聊会话无效，无法邀请成员"), true);
+        return;
+    }
+    if (m_groupInviteRequestId != 0 || m_pendingGroupInviteConversationId != 0)
+    {
+        m_mainWindow->setMessageStatus(QStringLiteral("另一条群聊邀请正在处理中，请稍候"), false);
+        return;
+    }
+    if (!m_tcpClient->isConnected())
+    {
+        m_mainWindow->setMessageStatus(QStringLiteral("连接已断开，无法邀请群成员"), true);
+        return;
+    }
+
+    m_pendingGroupInviteConversationId = conversationId;
+    if (m_friendListRequestId != 0)
+    {
+        // 复用已经发出的好友列表请求，收到响应后会继续弹出成员选择框。
+        m_mainWindow->setMessageStatus(QStringLiteral("正在加载好友列表…"), false);
+        return;
+    }
+
+    m_friendListRequestForNewSession = false;
+    const quint64 requestId = sendOperationRequest(
+        protocolHeader::CommandType::QUERY_FRIEND_LIST_REQUEST, QJsonObject{});
+    if (requestId != 0)
+    {
+        m_friendListRequestId = requestId;
+        m_mainWindow->setMessageStatus(QStringLiteral("正在加载可邀请的好友…"), false);
+    }
+    else
+    {
+        m_pendingGroupInviteConversationId = 0;
+        m_mainWindow->setMessageStatus(QStringLiteral("好友列表请求发送失败，请重试"), true);
+    }
+}
+
 void AppController::openPrivateConversation(quint64 targetUserId)
 {
     if (!m_isAuthenticated || m_isLoggingOut || m_mainWindow == nullptr)
@@ -1617,14 +1712,16 @@ void AppController::handleFriendListResponse(
         return;
     }
     const bool forNewSession = m_friendListRequestForNewSession;
+    const bool forGroupInvite = m_pendingGroupInviteConversationId > 0;
     m_friendListRequestForNewSession = false;
 
     if (responseCommand != protocolHeader::CommandType::QUERY_FRIEND_LIST_SUCCESS &&
         responseCommand != protocolHeader::CommandType::QUERY_FRIEND_LIST_FAILED)
     {
         const QString message = QStringLiteral("服务器返回了无法识别的好友列表响应");
+        m_pendingGroupInviteConversationId = 0;
         m_mainWindow->setContactsStatus(message, true);
-        if (forNewSession)
+        if (forNewSession || forGroupInvite)
         {
             m_mainWindow->setMessageStatus(message, true);
         }
@@ -1636,8 +1733,9 @@ void AppController::handleFriendListResponse(
     if (parseError.error != QJsonParseError::NoError || !document.isObject())
     {
         const QString message = QStringLiteral("无法解析服务器返回的好友列表");
+        m_pendingGroupInviteConversationId = 0;
         m_mainWindow->setContactsStatus(message, true);
-        if (forNewSession)
+        if (forNewSession || forGroupInvite)
         {
             m_mainWindow->setMessageStatus(message, true);
         }
@@ -1649,8 +1747,9 @@ void AppController::handleFriendListResponse(
                                       .toString(QStringLiteral("好友列表请求已完成"));
     if (responseCommand == protocolHeader::CommandType::QUERY_FRIEND_LIST_FAILED)
     {
+        m_pendingGroupInviteConversationId = 0;
         m_mainWindow->setContactsStatus(serverMessage, true);
-        if (forNewSession)
+        if (forNewSession || forGroupInvite)
         {
             m_mainWindow->setMessageStatus(serverMessage, true);
         }
@@ -1661,8 +1760,9 @@ void AppController::handleFriendListResponse(
     if (!dataValue.isArray())
     {
         const QString message = QStringLiteral("好友列表响应缺少 data 数组");
+        m_pendingGroupInviteConversationId = 0;
         m_mainWindow->setContactsStatus(message, true);
-        if (forNewSession)
+        if (forNewSession || forGroupInvite)
         {
             m_mainWindow->setMessageStatus(message, true);
         }
@@ -1699,6 +1799,12 @@ void AppController::handleFriendListResponse(
     if (forNewSession)
     {
         promptFriendSelection(dataValue.toArray());
+    }
+    if (m_pendingGroupInviteConversationId > 0)
+    {
+        const quint64 conversationId = m_pendingGroupInviteConversationId;
+        m_pendingGroupInviteConversationId = 0;
+        promptGroupInviteSelection(dataValue.toArray(), conversationId);
     }
 }
 
@@ -2027,6 +2133,256 @@ void AppController::promptFriendSelection(const QJsonArray &friends)
     openPrivateConversation(targetUserId);
 }
 
+void AppController::promptGroupInviteSelection(const QJsonArray &friends,
+                                               quint64 conversationId)
+{
+    if (m_mainWindow == nullptr || conversationId == 0)
+    {
+        return;
+    }
+
+    struct FriendChoice
+    {
+        quint64 userId = 0;
+        QString display;
+    };
+    QVector<FriendChoice> choices;
+    for (const QJsonValue &value : friends)
+    {
+        if (!value.isObject())
+        {
+            continue;
+        }
+        const QJsonObject object = value.toObject();
+        quint64 userId = 0;
+        if (!readPositiveJsonInteger(object, protocolBody::USER_ID, userId))
+        {
+            continue;
+        }
+        const QString username = object.value(QString::fromLatin1(protocolBody::USERNAME))
+                                     .toString().trimmed();
+        const QString nickname = object.value(QString::fromLatin1(protocolBody::NICKNAME))
+                                     .toString().trimmed();
+        if (username.isEmpty())
+        {
+            continue;
+        }
+        const QString displayName = nickname.isEmpty() ? username : nickname;
+        choices.push_back({userId, username == displayName
+                                       ? displayName
+                                       : QStringLiteral("%1  @%2").arg(displayName, username)});
+    }
+
+    if (choices.isEmpty())
+    {
+        m_mainWindow->setMessageStatus(
+            QStringLiteral("好友列表为空，暂时没有可邀请的好友。可以先添加好友后再试。"), false);
+        return;
+    }
+
+    QDialog dialog(m_mainWindow);
+    dialog.setWindowTitle(QStringLiteral("邀请群成员"));
+    dialog.setWindowFlags(Qt::Dialog | Qt::FramelessWindowHint);
+    dialog.setAttribute(Qt::WA_TranslucentBackground, true);
+    dialog.setModal(true);
+    dialog.setFixedSize(480, 520);
+
+    auto *outerLayout = new QVBoxLayout(&dialog);
+    outerLayout->setContentsMargins(18, 18, 18, 18);
+    auto *card = new QFrame(&dialog);
+    card->setObjectName(QStringLiteral("groupInviteDialogCard"));
+    card->setAttribute(Qt::WA_StyledBackground, true);
+    card->setStyleSheet(QStringLiteral(
+        "QFrame#groupInviteDialogCard { background: %1; border: 1px solid #E8E1F5; border-radius: 18px; }")
+        .arg(Theme::Surface.name()));
+    auto *shadow = new QGraphicsDropShadowEffect(card);
+    shadow->setBlurRadius(30.0);
+    shadow->setOffset(0.0, 8.0);
+    shadow->setColor(Theme::WindowShadowColor);
+    card->setGraphicsEffect(shadow);
+
+    auto *layout = new QVBoxLayout(card);
+    layout->setContentsMargins(24, 22, 24, 22);
+    layout->setSpacing(10);
+
+    auto *title = new QLabel(QStringLiteral("邀请好友加入群聊"), card);
+    title->setStyleSheet(QStringLiteral("color: #302A48; font-size: 19px; font-weight: 800;"));
+    auto *description = new QLabel(
+        QStringLiteral("勾选要邀请的好友。服务器会再次验证群成员身份与好友关系。"), card);
+    description->setWordWrap(true);
+    description->setStyleSheet(QStringLiteral("color: #8F87A8; font-size: 12px;"));
+
+    auto *toolbar = new QHBoxLayout;
+    auto *countLabel = new QLabel(QStringLiteral("已选择 0 人"), card);
+    countLabel->setStyleSheet(QStringLiteral("color: #817896; font-size: 12px;"));
+    auto *selectAllButton = new QPushButton(QStringLiteral("全选"), card);
+    selectAllButton->setCursor(Qt::PointingHandCursor);
+    selectAllButton->setStyleSheet(QStringLiteral(
+        "QPushButton { color: #6A53F6; background: #F2EEFF; border: 1px solid #E4DDFB; "
+        "border-radius: 8px; padding: 5px 12px; font-size: 12px; }"
+        "QPushButton:hover { background: #E8E1FF; }"));
+    toolbar->addWidget(countLabel);
+    toolbar->addStretch(1);
+    toolbar->addWidget(selectAllButton);
+
+    auto *list = new QListWidget(card);
+    list->setObjectName(QStringLiteral("groupInviteFriendList"));
+    list->setStyleSheet(QStringLiteral(
+        "QListWidget { background: #FCFBFF; border: 1px solid #ECE6F7; border-radius: 10px; "
+        "padding: 6px; outline: none; color: #413957; }"
+        "QListWidget::item { padding: 8px; border-radius: 6px; }"
+        "QListWidget::item:hover { background: #F2EEFF; }"));
+    for (const FriendChoice &choice : choices)
+    {
+        auto *item = new QListWidgetItem(choice.display, list);
+        item->setData(Qt::UserRole, QVariant::fromValue<qulonglong>(choice.userId));
+        item->setFlags(item->flags() | Qt::ItemIsUserCheckable | Qt::ItemIsEnabled);
+        item->setCheckState(Qt::Unchecked);
+    }
+
+    auto *buttonRow = new QHBoxLayout;
+    buttonRow->addStretch(1);
+    auto *cancelButton = new QPushButton(QStringLiteral("取消"), card);
+    auto *inviteButton = new QPushButton(QStringLiteral("发送邀请"), card);
+    inviteButton->setEnabled(false);
+    cancelButton->setCursor(Qt::PointingHandCursor);
+    inviteButton->setCursor(Qt::PointingHandCursor);
+    cancelButton->setStyleSheet(QStringLiteral(
+        "QPushButton { color: #625879; background: #F0EDFA; border: 1px solid #E4DDF3; "
+        "border-radius: 9px; padding: 9px 18px; }"
+        "QPushButton:hover { background: #E8E1FB; }"));
+    inviteButton->setStyleSheet(QStringLiteral(
+        "QPushButton { color: white; background: #6A53F6; border: none; border-radius: 9px; "
+        "padding: 9px 18px; font-weight: 700; }"
+        "QPushButton:hover { background: #5941E7; }"
+        "QPushButton:disabled { color: #D8D2E8; background: #B4A9E7; }"));
+    buttonRow->addWidget(cancelButton);
+    buttonRow->addWidget(inviteButton);
+
+    layout->addWidget(title);
+    layout->addWidget(description);
+    layout->addLayout(toolbar);
+    layout->addWidget(list, 1);
+    layout->addLayout(buttonRow);
+    outerLayout->addWidget(card);
+
+    auto updateSelectionCount = [list, countLabel, inviteButton]()
+    {
+        int selectedCount = 0;
+        for (int row = 0; row < list->count(); ++row)
+        {
+            const QListWidgetItem *item = list->item(row);
+            if (item != nullptr && item->checkState() == Qt::Checked)
+            {
+                ++selectedCount;
+            }
+        }
+        countLabel->setText(QStringLiteral("已选择 %1 人").arg(selectedCount));
+        inviteButton->setEnabled(selectedCount > 0);
+    };
+    connect(list, &QListWidget::itemChanged, &dialog,
+            [updateSelectionCount](QListWidgetItem *) { updateSelectionCount(); });
+    connect(selectAllButton, &QPushButton::clicked, &dialog, [list, updateSelectionCount]()
+    {
+        bool shouldSelectAll = false;
+        for (int row = 0; row < list->count(); ++row)
+        {
+            if (list->item(row)->checkState() != Qt::Checked)
+            {
+                shouldSelectAll = true;
+                break;
+            }
+        }
+        for (int row = 0; row < list->count(); ++row)
+        {
+            list->item(row)->setCheckState(shouldSelectAll ? Qt::Checked : Qt::Unchecked);
+        }
+        updateSelectionCount();
+    });
+    connect(cancelButton, &QPushButton::clicked, &dialog, &QDialog::reject);
+    connect(inviteButton, &QPushButton::clicked, &dialog, &QDialog::accept);
+
+    const QPoint parentCenter = m_mainWindow->mapToGlobal(m_mainWindow->rect().center());
+    dialog.move(parentCenter.x() - dialog.width() / 2,
+                parentCenter.y() - dialog.height() / 2);
+    if (dialog.exec() != QDialog::Accepted)
+    {
+        m_mainWindow->setMessageStatus(QStringLiteral("已取消群聊邀请"), false);
+        return;
+    }
+
+    QJsonArray selectedUserIds;
+    for (int row = 0; row < list->count(); ++row)
+    {
+        const QListWidgetItem *item = list->item(row);
+        if (item != nullptr && item->checkState() == Qt::Checked)
+        {
+            selectedUserIds.append(static_cast<qint64>(item->data(Qt::UserRole).toULongLong()));
+        }
+    }
+    if (selectedUserIds.isEmpty())
+    {
+        m_mainWindow->setMessageStatus(QStringLiteral("请至少选择一位好友"), true);
+        return;
+    }
+
+    QJsonObject requestBody;
+    requestBody.insert(QString::fromLatin1(protocolBody::CONVERSATION_ID),
+                       static_cast<qint64>(conversationId));
+    requestBody.insert(QString::fromLatin1(protocolBody::USER_IDS), selectedUserIds);
+    const quint64 requestId = sendOperationRequest(
+        protocolHeader::CommandType::GROUP_MEMBER_INVITE_REQUEST, requestBody);
+    if (requestId != 0)
+    {
+        m_groupInviteRequestId = requestId;
+        m_mainWindow->setMessageStatus(QStringLiteral("正在发送群聊邀请…"), false);
+    }
+}
+
+void AppController::handleGroupInviteResponse(
+    protocolHeader::CommandType responseCommand,
+    const QByteArray &jsonBody)
+{
+    if (m_mainWindow == nullptr)
+    {
+        return;
+    }
+    if (responseCommand != protocolHeader::CommandType::GROUP_MEMBER_INVITE_SUCCESS &&
+        responseCommand != protocolHeader::CommandType::GROUP_MEMBER_INVITE_FAILED)
+    {
+        m_mainWindow->setMessageStatus(QStringLiteral("服务器返回了无法识别的群聊邀请响应"), true);
+        return;
+    }
+
+    QJsonParseError parseError;
+    const QJsonDocument document = QJsonDocument::fromJson(jsonBody, &parseError);
+    if (parseError.error != QJsonParseError::NoError || !document.isObject())
+    {
+        m_mainWindow->setMessageStatus(QStringLiteral("无法解析服务器返回的群聊邀请结果"), true);
+        return;
+    }
+
+    const QJsonObject body = document.object();
+    const QString serverMessage = body.value(QString::fromLatin1(protocolBody::MESSAGE))
+                                      .toString(QStringLiteral("群聊邀请请求已完成"));
+    if (responseCommand == protocolHeader::CommandType::GROUP_MEMBER_INVITE_FAILED)
+    {
+        m_mainWindow->setMessageStatus(serverMessage, true);
+        return;
+    }
+
+    const QJsonObject data = body.value(QString::fromLatin1(protocolBody::DATA)).toObject();
+    const int invitedCount = data.value(QString::fromLatin1(protocolBody::INVITED_COUNT)).toInt(0);
+    m_mainWindow->setMessageStatus(
+        invitedCount > 0
+            ? QStringLiteral("%1，本次新增 %2 位成员。在线好友会自动收到群聊，离线好友下次登录后可见。")
+                  .arg(serverMessage).arg(invitedCount)
+            : serverMessage,
+        false);
+    // 邀请人也刷新一次，确保服务器返回的当前会话状态保持最新。
+    requestConversationList();
+}
+
 void AppController::handleCreateConversationResponse(
     protocolHeader::CommandType responseCommand,
     const QByteArray &jsonBody)
@@ -2307,6 +2663,8 @@ void AppController::onLoginSucceeded()
                 this, &AppController::onFriendRequestHandleRequested);
         connect(m_mainWindow, &MainWindow::contactOpenPrivateChatRequested,
                 this, &AppController::onContactOpenPrivateChatRequested);
+        connect(m_mainWindow, &MainWindow::groupInviteRequested,
+                this, &AppController::onGroupInviteRequested);
     }
 
     m_mainWindow->clearSessions();

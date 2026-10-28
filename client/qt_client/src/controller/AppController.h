@@ -55,6 +55,7 @@ private slots:
     void onFriendRequestSendRequested(const QString &username);
     void onFriendRequestHandleRequested(quint64 requestId, int action);
     void onContactOpenPrivateChatRequested(quint64 userId);
+    void onGroupInviteRequested(quint64 conversationId);
 
 private:
     // 一个请求在真正发送前需要保存命令、编号和 JSON 内容。
@@ -117,6 +118,9 @@ private:
     void handleCreateConversationResponse(protocolHeader::CommandType responseCommand,
                                          const QByteArray &jsonBody);
     void promptFriendSelection(const QJsonArray &friends);
+    void promptGroupInviteSelection(const QJsonArray &friends, quint64 conversationId);
+    void handleGroupInviteResponse(protocolHeader::CommandType responseCommand,
+                                   const QByteArray &jsonBody);
     void handleHistoryResponse(quint64 requestId, protocolHeader::CommandType responseCommand, const QByteArray &jsonBody);
 
     // 统一显示紫灰主题提示框。
@@ -179,6 +183,8 @@ private:
     quint64 m_pendingHandledFriendUserId = 0;
     int m_pendingFriendRequestAction = 0;
     quint64 m_createConversationRequestId = 0;
+    quint64 m_groupInviteRequestId = 0;
+    quint64 m_pendingGroupInviteConversationId = 0;
     bool m_friendListRequestForNewSession = false;
     quint64 m_pendingConversationSelectionId = 0;
     bool m_conversationListRefreshPending = false;

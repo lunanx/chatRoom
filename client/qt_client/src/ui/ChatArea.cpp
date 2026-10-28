@@ -20,6 +20,7 @@
 #include <QDebug>
 #include <QTimer>
 #include <QScrollBar>
+#include <QPushButton>
 #include <QPersistentModelIndex>
 
 namespace
@@ -96,6 +97,26 @@ ChatArea::ChatArea(QWidget *parent)
     identityLayout->addWidget(statusRow);
     headerLayout->addWidget(identityWidget);
     headerLayout->addStretch(1);
+
+    // 群聊中展示“邀请成员”入口；点击后由 MainWindow/AppController 负责业务和网络请求。
+    m_inviteMembersButton = new QPushButton(QStringLiteral("邀请成员"), header);
+    m_inviteMembersButton->setObjectName(QStringLiteral("inviteGroupMembersButton"));
+    m_inviteMembersButton->setCursor(Qt::PointingHandCursor);
+    m_inviteMembersButton->setFixedHeight(30);
+    m_inviteMembersButton->setStyleSheet(QStringLiteral(
+        "QPushButton#inviteGroupMembersButton { color: #6A53F6; background: #F2EEFF; "
+        "border: 1px solid #E4DDFB; border-radius: 9px; padding: 0 12px; font-size: 12px; font-weight: 650; }"
+        "QPushButton#inviteGroupMembersButton:hover { background: #E8E1FF; }"
+        "QPushButton#inviteGroupMembersButton:disabled { color: #B8B0CA; background: #F7F5FB; border-color: #EEEAF6; }"));
+    m_inviteMembersButton->setVisible(false);
+    connect(m_inviteMembersButton, &QPushButton::clicked, this, [this]()
+    {
+        if (m_currentConversationIsGroup && m_currentConversationId > 0)
+        {
+            emit inviteMembersRequested(m_currentConversationId);
+        }
+    });
+    headerLayout->addWidget(m_inviteMembersButton);
 
     // 服务器连接状态单独显示，不与当前会话类型（私聊/群聊）混在一起。
     m_networkStatusBadge = new QWidget(header);
@@ -252,8 +273,15 @@ void ChatArea::setNetworkStatus(const QString &message, const QString &state)
 
 void ChatArea::setConversationInfo(const QString &name,
                                    const QString &avatarText,
-                                   const QString &statusText)
+                                   const QString &statusText,
+                                   bool isGroup)
 {
+    m_currentConversationIsGroup = isGroup;
+    if (m_inviteMembersButton != nullptr)
+    {
+        m_inviteMembersButton->setVisible(isGroup);
+        m_inviteMembersButton->setEnabled(isGroup && m_currentConversationId > 0);
+    }
     m_nameLabel->setText(name);
     m_avatarLabel->setText(avatarText.isEmpty() ? QStringLiteral("?") : avatarText.left(1));
     m_statusLabel->setText(statusText);
@@ -321,6 +349,10 @@ void ChatArea::clearMessageInput()
 void ChatArea::setCurrentConversationId(quint64 conversationId)
 {
     m_currentConversationId = conversationId;
+    if (m_inviteMembersButton != nullptr)
+    {
+        m_inviteMembersButton->setEnabled(m_currentConversationIsGroup && conversationId > 0);
+    }
     m_messageFilterModel->setConversationId(conversationId);
 
     // 切换会话时恢复历史按钮状态；ID 为 0 时禁止查询历史消息。
