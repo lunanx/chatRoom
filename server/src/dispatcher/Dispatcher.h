@@ -5,8 +5,10 @@
 #include "service/MessageService.h"
 #include "service/ConversationService.h"
 #include "service/FriendService.h"
+#include "service/GroupInviteService.h"
 #include "net/ClientSession.h"
 #include <optional>
+#include <vector>
 
 struct DispatchResult
 {
@@ -14,6 +16,8 @@ struct DispatchResult
     std::optional<Message> message; // 不需要广播时就为空
     std::optional<std::uint64_t> conversationId;// 当会话创建成功时需要给客户端返回
     std::optional<std::uint64_t> lastSeq; // 对应数据库中的 Conversation.last_seq
+    // 本次成功加入群聊的用户；EpollReactor 负责向这些在线用户推送会话刷新事件。
+    std::vector<std::uint64_t> invitedUserIds;
 };
 /*
     业务调度器

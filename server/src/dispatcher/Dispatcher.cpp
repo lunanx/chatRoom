@@ -31,6 +31,8 @@ namespace
             return protocolHeader::CommandType::QUERY_FRIEND_LIST_FAILED;
         case protocolHeader::CommandType::QUERY_CONVERSATION_LIST_REQUEST:
             return protocolHeader::CommandType::QUERY_CONVERSATION_LIST_FAILED;
+        case protocolHeader::CommandType::GROUP_MEMBER_INVITE_REQUEST:
+            return protocolHeader::CommandType::GROUP_MEMBER_INVITE_FAILED;
         default:
             return protocolHeader::CommandType::UNKNOWN;
         }
@@ -164,6 +166,28 @@ DispatchResult Dispatcher::dispatch(const protocolHeader::PacketFrame &frame, Cl
             {
                 const auto &user = session.getAuthenticatedUser();
                 responseCommand = MessageService::MessageHistoryQuery(frame.m_body, responseBody, user->userId);
+            }
+        }
+        // 邀请好友加入群聊。邀请人身份只取自服务端认证会话。
+        else if (command == protocolHeader::CommandType::GROUP_MEMBER_INVITE_REQUEST)
+        {
+            if (!session.isAuthenticated())
+            {
+                responseCommand = protocolHeader::CommandType::GROUP_MEMBER_INVITE_FAILED;
+                responseBody = makeResponseBody(responseCommand, "当前没有账号登录");
+            }
+            else
+            {
+                const auto &user = session.getAuthenticatedUser();
+                const GroupInviteResult result = GroupInviteService::inviteMembers(
+                    frame.m_body, responseBody, user->userId);
+                responseCommand = result.command;
+                if (responseCommand == protocolHeader::CommandType::GROUP_MEMBER_INVITE_SUCCESS)
+                {
+                    // 记录邀请人对群会话的订阅关系，并在 EpollReactor 中通知新增成员。
+                    dispatchResult.conversationId = result.conversationId;
+                    dispatchResult.invitedUserIds = result.invitedUserIds;
+                }
             }
         }
         // 查询会话列表

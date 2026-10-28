@@ -147,13 +147,22 @@ namespace protocolHeader
         QUERY_FRIEND_LIST_REQUEST = 35,
         QUERY_FRIEND_LIST_SUCCESS = 36,
         QUERY_FRIEND_LIST_FAILED = 37,
-        
+
         /*
             查询当前登录用户的会话列表
         */
         QUERY_CONVERSATION_LIST_REQUEST = 38,
         QUERY_CONVERSATION_LIST_SUCCESS = 39,
-        QUERY_CONVERSATION_LIST_FAILED = 40
+        QUERY_CONVERSATION_LIST_FAILED = 40,
+        
+        /*
+            邀请好友加入群聊
+        */
+        GROUP_MEMBER_INVITE_REQUEST = 41,
+        GROUP_MEMBER_INVITE_SUCCESS = 42,
+        GROUP_MEMBER_INVITE_FAILED = 43,
+        // 服务端推送：当前在线用户被邀请加入群聊，客户端应刷新会话列表。
+        GROUP_MEMBER_INVITED_PUSH = 44
     };
     /*
        单个Body允许的最大长度

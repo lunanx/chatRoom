@@ -36,6 +36,9 @@ struct BroadcastTask
 {
     std::uint64_t conversationId;
     std::string encodedFrame;
+    // targetUserId > 0 时是用户定向通知；否则按 conversationId 广播。
+    // 用于系统通知，如群聊邀请，是定向通知
+    std::uint64_t targetUserId{0};
 };
 
 /*
@@ -154,10 +157,10 @@ private:
 
     std::mutex m_broadcastMutex; // 防止发送线程和接收线程同时操作队列,需要互斥锁，这里不能用全局mux,保证各个Reactor队列互不影响
 
-    //双向索引
+    // 双向索引
     std::unordered_map<std::uint64_t, std::unordered_set<int>> m_sessionFdsByConversationId; // 每个Subreactor中处于相同conversation_id的cli,这样加起来就是同一个聊天室了
-    std::unordered_map<int, std::unordered_set<std::uint64_t>> m_conversationsBySessionFd; // fd -> 该连接已打开的会话，断线时用于反向清理
-    
+    std::unordered_map<int, std::unordered_set<std::uint64_t>> m_conversationsBySessionFd;   // fd -> 该连接已打开的会话，断线时用于反向清理
+
     std::array<SubReactor *, subMAXCnt> m_targetReactors{}; // 保存所有SubReactor的指针，包括自己,但只读
 };
 

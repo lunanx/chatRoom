@@ -51,6 +51,8 @@ namespace protocolBody
     constexpr const char *USER_ID_2 = "user_id_2";
     constexpr const char *TARGET_USER_ID = "target_user_id"; // 创建或打开私聊时的对方用户 ID
     constexpr const char *GROUP_ID = "group_id";
+    constexpr const char *USER_IDS = "user_ids";           // 群邀请目标用户 ID 数组
+    constexpr const char *INVITED_COUNT = "invited_count"; // 本次新增的群成员数量
     constexpr const char *LAST_SEQ = "last_seq";
     constexpr const char *DISPLAY_NAME = "display_name";
     constexpr const char *LAST_MESSAGE = "last_message";
@@ -63,7 +65,7 @@ namespace protocolBody
     constexpr const char *NEXT_CURSOR = "next_cursor";
 
     /*
-    好友功能相关
+        好友功能相关
     */
     constexpr const char *TARGET_USERNAME = "target_username";     // 发送好友申请的目标用户名
     constexpr const char *FRIEND_REQUEST_ID = "friend_request_id"; // FriendRequest 表中的申请 ID

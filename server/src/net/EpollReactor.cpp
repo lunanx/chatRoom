@@ -666,17 +666,41 @@ void SubReactor::reactor(int reactorId)
                         m_broadcastQueue.pop();
                     }
 
-                    std::uint64_t conversationId = newbroadcastQueue.conversationId;
-                    auto cliSessions = m_sessionFdsByConversationId.find(conversationId);
-                    if (cliSessions == m_sessionFdsByConversationId.end())
+                    std::unordered_set<int> clientFDSet;
+                    if (newbroadcastQueue.targetUserId > 0)
                     {
-                        // 说明这个conversation_id 在当前线程并没有客户端加入了
-                        // 进行检查下一个conversation_id
+                        // 用户定向通知只在当前 SubReactor 自己持有的连接中查找，
+                        // 不跨线程访问其他 Reactor 的 ClientSession。
+                        for (const auto &sessionEntry : m_cliSessionsMap)
+                        {
+                            const ClientSession *candidate = sessionEntry.second.get();
+                            if (candidate == nullptr || !candidate->isAuthenticated())
+                            {
+                                continue;
+                            }
+                            const auto &authenticatedUser = candidate->getAuthenticatedUser();
+                            if (authenticatedUser.has_value() &&
+                                authenticatedUser->userId == newbroadcastQueue.targetUserId)
+                            {
+                                clientFDSet.insert(sessionEntry.first);
+                            }
+                        }
+                    }
+                    else
+                    {
+                        auto cliSessions = m_sessionFdsByConversationId.find(newbroadcastQueue.conversationId);
+                        if (cliSessions == m_sessionFdsByConversationId.end())
+                        {
+                            // 这个 SubReactor 当前没有订阅该会话的客户端。
+                            continue;
+                        }
+                        // 复制 fd 集合，发送失败时 removeEpollFD 会修改原索引。
+                        clientFDSet = cliSessions->second;
+                    }
+                    if (clientFDSet.empty())
+                    {
                         continue;
                     }
-                    // 复制fd列表，
-                    // 之后发送失败时 removeEpollFD 会修改索引集合。
-                    auto clientFDSet = cliSessions->second;
                     std::string sendFrame = newbroadcastQueue.encodedFrame;
                     for (int fd : clientFDSet)
                     {
@@ -796,7 +820,6 @@ void SubReactor::reactor(int reactorId)
                             // 处理frame，但具体还未实现，先写主要架构
                             // 主要实现的时候注意，outputFrame是局部变量
 
-                            //-------以下也是测试，是为了搭配测试--------
                             auto responseResult = m_dispatcher.dispatch(outputFrame, *cli);
                             nlohmann::json responseBody = nlohmann::json::parse(responseResult.frame.m_body);
                             // 如果 responseResult 中有新保存的 Message，就通过跨 SubReactor 任务队列进行 TCP 投递。
@@ -848,7 +871,33 @@ void SubReactor::reactor(int reactorId)
                             {
                                 responseBody[protocolBody::LAST_SEQ] = responseResult.lastSeq.value();
                             }
-                            // 成功退出登录后，不再向该链接推送会话消息
+                            // 新增群成员的数据库事务已经提交；向在线受邀用户推送会话刷新事件。
+                            // 离线用户的成员关系已持久化，下次登录查询会话列表时也会看到该群。
+                            if (!responseResult.invitedUserIds.empty() && responseResult.conversationId.has_value())
+                            {
+                                nlohmann::json invitePushBody = {
+                                    {protocolBody::CONVERSATION_ID, responseResult.conversationId.value()},
+                                    {protocolBody::MESSAGE, "你已被邀请加入群聊"}};
+                                const std::string encodedInvitePush = m_encoder.buildBufPacket(
+                                    static_cast<std::uint16_t>(protocolHeader::CommandType::GROUP_MEMBER_INVITED_PUSH),
+                                    0,
+                                    invitePushBody);
+                                for (const std::uint64_t invitedUserId : responseResult.invitedUserIds)
+                                {
+                                    BroadcastTask task;
+                                    task.conversationId = 0;
+                                    task.targetUserId = invitedUserId;
+                                    task.encodedFrame = encodedInvitePush;
+                                    for (SubReactor *target : m_targetReactors)
+                                    {
+                                        if (target == nullptr || !target->enqueueBroadcastTask(task))
+                                        {
+                                            std::cerr << "群成员邀请通知投递失败，目标 Reactor 暂未接收任务\n";
+                                        }
+                                    }
+                                }
+                            }
+                            // 成功退出登录后，不再向该连接推送会话消息
                             if (responseResult.frame.m_command == static_cast<std::uint16_t>(protocolHeader::CommandType::LOGOUT_SUCCESS))
                             {
                                 clearSessionConversations(newfd);
@@ -907,9 +956,6 @@ void SubReactor::reactor(int reactorId)
 
                 if (events & EPOLLOUT)
                 {
-                    // ---------------以下为测试！！！！！！----------------------
-
-                    // 本来这里应该是吧outputframe给其他类进一步处理的，但因为还没设置其他类，没办法直接加入EPOLLOUT，就只想到这样测试了
                     // 发送空数据继续处理未发送的数据
                     int res = cli->handle_write("");
                     if (res == -1) // 有错误
@@ -934,8 +980,6 @@ void SubReactor::reactor(int reactorId)
                     }
 
                     // res == 1的情况不需要在判断了，因为就是有EPOLLOUT才进入的这里。
-
-                    //----------- 测试结束
                 }
             }
         }
