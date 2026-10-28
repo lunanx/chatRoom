@@ -98,26 +98,6 @@ ChatArea::ChatArea(QWidget *parent)
     headerLayout->addWidget(identityWidget);
     headerLayout->addStretch(1);
 
-    // 群聊中展示“邀请成员”入口；点击后由 MainWindow/AppController 负责业务和网络请求。
-    m_inviteMembersButton = new QPushButton(QStringLiteral("邀请成员"), header);
-    m_inviteMembersButton->setObjectName(QStringLiteral("inviteGroupMembersButton"));
-    m_inviteMembersButton->setCursor(Qt::PointingHandCursor);
-    m_inviteMembersButton->setFixedHeight(30);
-    m_inviteMembersButton->setStyleSheet(QStringLiteral(
-        "QPushButton#inviteGroupMembersButton { color: #6A53F6; background: #F2EEFF; "
-        "border: 1px solid #E4DDFB; border-radius: 9px; padding: 0 12px; font-size: 12px; font-weight: 650; }"
-        "QPushButton#inviteGroupMembersButton:hover { background: #E8E1FF; }"
-        "QPushButton#inviteGroupMembersButton:disabled { color: #B8B0CA; background: #F7F5FB; border-color: #EEEAF6; }"));
-    m_inviteMembersButton->setVisible(false);
-    connect(m_inviteMembersButton, &QPushButton::clicked, this, [this]()
-    {
-        if (m_currentConversationIsGroup && m_currentConversationId > 0)
-        {
-            emit inviteMembersRequested(m_currentConversationId);
-        }
-    });
-    headerLayout->addWidget(m_inviteMembersButton);
-
     // 服务器连接状态单独显示，不与当前会话类型（私聊/群聊）混在一起。
     m_networkStatusBadge = new QWidget(header);
     m_networkStatusBadge->setObjectName(QStringLiteral("networkStatusBadge"));
@@ -134,6 +114,30 @@ ChatArea::ChatArea(QWidget *parent)
     networkStatusLayout->addWidget(m_networkStatusDot);
     networkStatusLayout->addWidget(m_networkStatusLabel);
     headerLayout->addWidget(m_networkStatusBadge);
+
+    // 邀请成员按钮始终保留在标题栏，避免会话类型还未识别时整个入口消失。
+    // 非群聊或尚未选中有效会话时禁用；群聊被选中后由 setConversationInfo / setCurrentConversationId 启用。
+    m_inviteMembersButton = new QPushButton(QStringLiteral("邀请成员"), header);
+    m_inviteMembersButton->setObjectName(QStringLiteral("inviteGroupMembersButton"));
+    m_inviteMembersButton->setCursor(Qt::PointingHandCursor);
+    m_inviteMembersButton->setFixedHeight(30);
+    m_inviteMembersButton->setStyleSheet(QStringLiteral(
+        "QPushButton#inviteGroupMembersButton { color: #6A53F6; background: #F2EEFF; "
+        "border: 1px solid #E4DDFB; border-radius: 9px; padding: 0 12px; font-size: 12px; font-weight: 650; }"
+        "QPushButton#inviteGroupMembersButton:hover { background: #E8E1FF; }"
+        "QPushButton#inviteGroupMembersButton:disabled { color: #8D879C; background: #F7F5FB; border-color: #EEEAF6; }"));
+    m_inviteMembersButton->setVisible(true);
+    m_inviteMembersButton->setEnabled(false);
+    m_inviteMembersButton->setToolTip(QStringLiteral("请先选择一个群聊"));
+    connect(m_inviteMembersButton, &QPushButton::clicked, this, [this]()
+    {
+        if (m_currentConversationIsGroup && m_currentConversationId > 0)
+        {
+            emit inviteMembersRequested(m_currentConversationId);
+        }
+    });
+    headerLayout->addWidget(m_inviteMembersButton);
+
     // 为主窗口右上角的自定义窗口控制按钮留出空间，避免和状态徽标重叠。
     headerLayout->addSpacing(100);
     setNetworkStatus(QStringLiteral("已连接服务器"), QStringLiteral("connected"));
@@ -279,8 +283,11 @@ void ChatArea::setConversationInfo(const QString &name,
     m_currentConversationIsGroup = isGroup;
     if (m_inviteMembersButton != nullptr)
     {
-        m_inviteMembersButton->setVisible(isGroup);
+        m_inviteMembersButton->setVisible(true);
         m_inviteMembersButton->setEnabled(isGroup && m_currentConversationId > 0);
+        m_inviteMembersButton->setToolTip(
+            isGroup ? QStringLiteral("邀请好友加入当前群聊")
+                    : QStringLiteral("请先选择一个群聊"));
     }
     m_nameLabel->setText(name);
     m_avatarLabel->setText(avatarText.isEmpty() ? QStringLiteral("?") : avatarText.left(1));
@@ -351,7 +358,12 @@ void ChatArea::setCurrentConversationId(quint64 conversationId)
     m_currentConversationId = conversationId;
     if (m_inviteMembersButton != nullptr)
     {
+        m_inviteMembersButton->setVisible(true);
         m_inviteMembersButton->setEnabled(m_currentConversationIsGroup && conversationId > 0);
+        m_inviteMembersButton->setToolTip(
+            (m_currentConversationIsGroup && conversationId > 0)
+                ? QStringLiteral("邀请好友加入当前群聊")
+                : QStringLiteral("请先选择一个群聊"));
     }
     m_messageFilterModel->setConversationId(conversationId);
 
