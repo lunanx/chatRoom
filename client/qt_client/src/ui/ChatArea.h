@@ -8,6 +8,7 @@
 #include "model/ChatMessageRecord.h"
 
 class QLabel;
+class QPushButton;
 class QListView;
 class QSplitter;
 class QResizeEvent;
@@ -29,7 +30,8 @@ public:
     // 当前服务端还未提供对方在线状态，因此不虚构对方在线/离线。
     void setConversationInfo(const QString &name,
                              const QString &avatarText,
-                             const QString &statusText);
+                             const QString &statusText,
+                             bool isGroup = false);
     // 显示当前客户端与服务器的连接状态；和会话类型状态彼此独立。
     void setNetworkStatus(const QString &message, const QString &state);
 
@@ -63,6 +65,8 @@ signals:
     void sendRequested(const QString &text);
     void historyRequested(quint64 conversationId);
     void retryMessageRequested(const QString &clientMessageId);
+    // 仅在群聊会话中允许发起邀请；参数是数据库 Conversation.id。
+    void inviteMembersRequested(quint64 conversationId);
 
 protected:
     // 窗口尺寸变化时，更新输入区允许的最大高度，确保它不超过消息区。
@@ -80,6 +84,8 @@ private:
     QWidget *m_networkStatusBadge = nullptr;
     QLabel *m_networkStatusLabel = nullptr;
     QLabel *m_networkStatusDot = nullptr;
+    QPushButton *m_inviteMembersButton = nullptr;
+    bool m_currentConversationIsGroup = false;
     QSplitter *m_contentSplitter = nullptr; // 垂直分隔消息区和输入区，允许用户调整比例。
     QListView *m_messageListView = nullptr;
     InputBar *m_inputBar = nullptr;

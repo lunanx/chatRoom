@@ -120,6 +120,8 @@ QWidget *MainWindow::createChatWorkspacePage()
             this, &MainWindow::historyRequested);
     connect(chatArea, &ChatArea::retryMessageRequested,
             this, &MainWindow::messageRetryRequested);
+    connect(chatArea, &ChatArea::inviteMembersRequested,
+            this, &MainWindow::groupInviteRequested);
 
     messageSplitter->addWidget(sessionPanel);
     messageSplitter->addWidget(chatArea);
@@ -212,7 +214,8 @@ QWidget *MainWindow::createChatWorkspacePage()
                         m_currentConversationIsGroup = session->group;
                         chatArea->setConversationInfo(
                             session->name, session->avatarText,
-                            session->group ? QStringLiteral("群聊") : QStringLiteral("私聊"));
+                            session->group ? QStringLiteral("群聊") : QStringLiteral("私聊"),
+                            session->group);
                         chatArea->setCurrentConversationId(m_currentConversationId);
                         if (m_currentConversationId > 0)
                         {
